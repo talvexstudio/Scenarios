@@ -1,0 +1,161 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scenarios</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="talvex-favicon-32.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="logo-block">
+      <img src="talvex-logo-dark.png" alt="Talvex Studio logo">
+    </div>
+    <div class="header-title">Talvex <span class="title-accent">Scenarios</span></div>
+    <nav class="header-nav">
+      <button type="button" id="aboutButton" class="header-link-button">About</button>
+    </nav>
+  </header>
+
+  <main class="main-layout">
+    <section class="view-panel" aria-label="3D massing viewport">
+      <div id="canvas-container">
+        <button type="button" class="spin-toggle" id="spinToggle" aria-pressed="false">Enable Spin</button>
+      </div>
+    </section>
+    <aside class="details-panel">
+      <p class="panel-label">Talvex Scenarios Board</p>
+      <div class="panel-toolbar">
+        <a href="configure.html" class="configure-button">Configure options</a>
+      </div>
+      <div class="selector-row">
+        <label for="optionSelect" class="sr-only">Select a massing option</label>
+        <select id="optionSelect" class="option-select"></select>
+      </div>
+
+      <div class="metrics-card" aria-live="polite">
+        <dl>
+          <div class="metric-row">
+            <dt>GFA</dt>
+            <dd id="metricGfa">-</dd>
+          </div>
+          <div id="programRows" class="program-rows"></div>
+          <div class="metric-row">
+            <dt>Efficiency</dt>
+            <dd id="metricEfficiency">-</dd>
+          </div>
+          <div class="metric-row">
+            <dt>Height</dt>
+            <dd id="metricHeight">-</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="list-block">
+        <h3>Pros</h3>
+        <ul id="prosList"></ul>
+      </div>
+
+      <div class="list-block">
+        <h3>Cons</h3>
+        <ul id="consList"></ul>
+      </div>
+
+      <div class="ai-section">
+        <h3>AI concept image</h3>
+        <p class="ai-help">
+          Capture the current 3D view and generate a concept image with AI.
+        </p>
+        <button type="button" id="openImageGenButton" class="primary-button">
+          Generate image
+        </button>
+      </div>
+    </aside>
+  </main>
+
+  <div id="aboutOverlay" class="about-overlay" aria-hidden="true">
+    <div class="about-modal" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+      <div class="about-modal-header">
+        <h2 id="aboutTitle">Talvex Scenarios</h2>
+        <button type="button" id="aboutCloseButton" class="about-close-button" aria-label="Close">&times;</button>
+      </div>
+      <div class="about-modal-body">
+        <p class="about-tagline">Interactive 3D scenarios for development decisions.</p>
+        <p>
+          Talvex Scenarios is an interactive 3D viewer for development options: switch between massing
+          scenarios, see key metrics side-by-side, and give investors and boards a clear picture before
+          you commit to a scheme.
+        </p>
+        <p class="about-footer">By Talvex Studio &middot; 2025</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="imageGenOverlay" class="imagegen-overlay" aria-hidden="true">
+    <div class="imagegen-modal" role="dialog" aria-modal="true" aria-labelledby="imageGenTitle">
+      <div class="imagegen-modal-header">
+        <h2 id="imageGenTitle">Generate AI image</h2>
+        <button type="button" id="imageGenCloseButton" class="imagegen-close-button" aria-label="Close">
+          &times;
+        </button>
+      </div>
+
+      <div class="imagegen-modal-body">
+        <p class="imagegen-intro">
+          We'll capture the current 3D view and use your prompt to generate a concept image.
+        </p>
+
+        <div class="imagegen-prompt-row">
+          <label for="imageGenPrompt">Prompt</label>
+          <textarea id="imageGenPrompt" rows="3"
+            placeholder="Describe the style or changes you want (e.g. 'evening light, realistic materials, warm tones')."></textarea>
+        </div>
+
+        <div id="imageGenStatusIdle" class="imagegen-status imagegen-status--active">
+          <p class="imagegen-status-text">Ready to capture the current view.</p>
+        </div>
+
+        <div id="imageGenStatusLoading" class="imagegen-status">
+          <p class="imagegen-status-text">Processing...</p>
+          <div class="imagegen-progress">
+            <div class="imagegen-progress-bar"></div>
+          </div>
+        </div>
+
+        <div id="imageGenStatusDone" class="imagegen-status">
+          <p class="imagegen-status-text">Here's the input and the generated result.</p>
+          <div class="imagegen-images">
+            <div class="imagegen-image-column">
+              <h4>Screenshot</h4>
+              <div class="imagegen-image-frame">
+                <img id="imageGenScreenshot" alt="Captured 3D view">
+              </div>
+            </div>
+            <div class="imagegen-image-column">
+              <h4>AI generated</h4>
+              <div class="imagegen-image-frame">
+                <img id="imageGenResult" alt="AI generated concept">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="imagegen-modal-footer">
+        <button type="button" id="imageGenGenerateButton" class="primary-button">
+          Capture &amp; generate
+        </button>
+        <button type="button" id="imageGenCancelButton" class="ghost-button">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="OBJLoader.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
