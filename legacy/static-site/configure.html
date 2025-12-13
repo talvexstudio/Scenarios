@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scenarios</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./talvex-favicon-32.png">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="logo-block">
+      <img src="./talvex-logo-dark.png" alt="Talvex Studio logo">
+    </div>
+    <div class="header-title">Talvex <span class="title-accent">Scenarios</span></div>
+    <nav class="header-nav">
+      <a href="./index.html">Dashboard</a>
+      <button type="button" id="aboutButton" class="header-link-button">About</button>
+    </nav>
+  </header>
+
+  <main class="configure-main">
+    <section class="configure-card">
+      <h1 class="configure-title">Configure options</h1>
+      <p class="configure-subtitle">
+        Upload an optional context model and one or more options for this project.
+      </p>
+
+      <div class="configure-section">
+        <h2>Context model (optional)</h2>
+        <p class="configure-help">
+          Upload a GLB/GLTF file with the surrounding context. You can skip this step.
+        </p>
+        <input type="file" id="contextModel" accept=".glb,.gltf">
+      </div>
+
+      <!-- Talvex Blocks: quick massing builder (placeholder) -->
+      <div class="configure-section">
+        <h2>Talvex Blocks (optional)</h2>
+        <p class="configure-help">
+          Don't have a 3D model yet? In a future version you'll be able to sketch a simple massing
+          directly in the browser using <strong>Talvex Blocks</strong>, a block-based builder for quick
+          scenarios. For now, upload GLB/GLTF models exported from your BIM workflow.
+        </p>
+        <button type="button" class="secondary-button" disabled>
+          Open Talvex Blocks (coming soon)
+        </button>
+      </div>
+
+      <div class="configure-section">
+        <h2>Options</h2>
+        <p class="configure-help">
+          Add one or more options. For each option, upload a 3D model file (GLB/GLTF) and a JSON metrics file exported from your BIM workflow.
+        </p>
+
+        <div id="optionsContainer"></div>
+
+        <button type="button" id="addOptionButton" class="ghost-button">
+          + Add another option
+        </button>
+      </div>
+
+      <div class="configure-actions">
+        <a href="./index.html" class="ghost-link">&larr; Back to viewer</a>
+        <button type="button" id="saveConfigButton" class="primary-button">
+          Save &amp; preview
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <div id="aboutOverlay" class="about-overlay" aria-hidden="true">
+    <div class="about-modal" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+      <div class="about-modal-header">
+        <h2 id="aboutTitle">Talvex Scenarios</h2>
+        <button type="button" id="aboutCloseButton" class="about-close-button" aria-label="Close">
+          ✕
+        </button>
+      </div>
+      <div class="about-modal-body">
+        <p class="about-tagline">Interactive 3D scenarios for development decisions.</p>
+        <p>
+          Talvex Scenarios is an interactive 3D viewer for development options: switch between massing
+          scenarios, see key metrics side-by-side, and give investors and boards a clear picture before
+          you commit to a scheme.
+        </p>
+        <p class="about-footer">By Talvex Studio · 2025</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="./configure.js"></script>
+</body>
+</html>

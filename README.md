@@ -1,20 +1,24 @@
 # Scenarios
 
-Talvex Scenarios is a minimalist, browser-based review tool that combines an interactive Three.js massing viewer with a decision panel so designers and stakeholders can compare architectural options at a glance. The experience was built to plug in real glTF assets later, expose metrics pulled from BIM workflows, and now includes UI stubs for AI concept-image generation so visual studies can be triggered without leaving the app.
+Talvex Scenarios is now the host interface of a unified Talvex application that ships two tightly-coupled modules: the Scenarios dashboard for reviewing immutable options and the Blocks workshop for building parametric block stacks. Both modules run inside a shared Vite + React + TypeScript shell, reuse a common Three.js massing renderer, share contracts/state via Zustand, and include stubs for AI concept-image generation so the full product pipeline can evolve without architectural rewrites.
 
 ## Features
-- **Three.js viewport** with OrbitControls, auto-spin toggle, ground plane, grid, and imported city context.
-- **Option board** that lists GFA/efficiency/height, program mix, pros/cons, and updates UI + 3D when you switch between Options A–C.
-- **AI concept image UI** that captures the current render, accepts prompts, and simulates generation so hooks are ready for backend integration.
-- **Configuration workflow** (separate page) for uploading context and option files and storing data in localStorage for future loading.
+- **Scenarios module** with decision panel, program metrics, auto-spin toggle, and shared renderer that visualizes immutable ScenarioOption snapshots.
+- **Blocks module** ("Talvex Blocks") workshop that edits block parameters, previews the geometry in real time, enforces the 3-option limit, and can send/replace options in Scenarios.
+- **TBK Save/Load workflow** that exports/imports pure parameter JSON snapshots; overwrite confirmation protects unsent edits.
+- **AI concept image UI** stub that captures the current viewport, accepts prompts, and simulates a generation pipeline for future backend integration.
+- **Shared domain layer** (types, unit helpers, metrics computation, renderer) plus Zustand stores for session-global units and options management.
 
 ## Getting Started
-1. Clone the repo and install any static-server tool you prefer (no build step required).
-2. Serve the folder locally, e.g. `python -m http.server 8000`, then visit `http://localhost:8000/index.html`.
-3. For the configure wizard, open `configure.html` from the same server so styles remain shared.
+1. Install dependencies at the repo root: 
+pm install.
+2. Run the dev server with 
+pm run dev and open the printed localhost URL (defaults to /scenarios).
+3. Build production assets via 
+pm run build (outputs to /dist).
 
 ## Controls & Usage
-- **Viewport**: Left-click drag rotates, right-click (or Ctrl-drag) pans, scroll zooms. Toggle auto-spin via the button in the canvas.
-- **Option select**: Use the dropdown to switch between Options A, B, and C; metrics and pros/cons update automatically.
-- **AI generator**: Click 'Generate image' to open the modal; the current render is captured automatically, and the placeholder workflow demonstrates the future flow.
-- **Configure page**: Add context/option GLBs and metrics JSON files; removal buttons appear once multiple options exist.
+- **Viewport**: Left-drag rotates, right-drag (or Ctrl-drag) pans, scroll zooms; toggle auto-spin in either module's canvas.
+- **Scenarios dashboard**: Use the dropdown to pick an option; metrics card and renderer update instantly. AI modal is available under "AI concept image".
+- **Blocks workshop**: Adjust block dimensions/positions/functions in the table, preview the stack live, then Send (or replace) to Scenarios, or Save/Load .TBK snapshots.
+- **TBK files**: Downloads default to YYYYMMDDhhmmss_Talvex_block.TBK; loading validates schema and replaces the workshop state after confirmation.
