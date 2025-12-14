@@ -44,10 +44,10 @@ export function ScenariosPage() {
   const handleConfigure = () => navigate('/blocks');
 
   return (
-    <div className="flex flex-col gap-6 pb-10">
-      <div className="flex flex-col lg:flex-row gap-6">
-        <section className="flex-1 rounded-[24px] border border-slate-200 bg-white shadow relative min-h-[480px]">
-          <div ref={canvasRef} className="w-full h-[500px] rounded-[24px] overflow-hidden bg-[#f4f6fb]" />
+    <div className="flex flex-col flex-1 min-h-0 gap-6">
+      <div className="flex flex-1 min-h-0 flex-col lg:flex-row gap-6">
+        <section className="flex-1 min-h-0 rounded-[24px] border border-slate-200 bg-white shadow relative">
+          <div ref={canvasRef} className="w-full h-full rounded-[24px] overflow-hidden bg-[#f4f6fb]" />
           <button
             type="button"
             aria-pressed={autoSpin}
@@ -58,44 +58,55 @@ export function ScenariosPage() {
           </button>
         </section>
 
-        <aside className="w-full lg:max-w-[420px] rounded-[24px] border border-slate-200 bg-white p-6 shadow flex flex-col gap-5">
-          <div className="flex items-center justify-between">
-            <p className="text-xs tracking-[0.2em] uppercase text-slate-500">Talvex Scenarios Board</p>
+        <aside className="w-full lg:max-w-[420px] h-full rounded-[24px] border border-slate-200 bg-white shadow flex flex-col">
+          <div className="flex-1 min-h-0 overflow-auto p-6 flex flex-col gap-5">
+            <div className="flex items-center justify-between">
+              <p className="text-xs tracking-[0.2em] uppercase text-slate-500">Talvex Scenarios Board</p>
+              <button
+                type="button"
+                onClick={handleConfigure}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
+              >
+                Configure options
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label htmlFor="scenarioSelect" className="text-xs text-slate-500">
+                Select option
+              </label>
+              <select
+                id="scenarioSelect"
+                value={selectedOption?.id}
+                onChange={(event) => selectOption(event.target.value)}
+                className="rounded-full border border-slate-200 bg-[#eef2ff] px-4 py-3 text-base font-semibold"
+              >
+                {options.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedOption ? (
+              <>
+                <MetricsCard option={selectedOption} />
+                <ProsCons option={selectedOption} />
+              </>
+            ) : (
+              <p className="text-sm text-slate-500">No options yet. Create one from the Blocks workshop.</p>
+            )}
+          </div>
+          <div className="sticky bottom-0 border-t border-slate-200 bg-white p-4">
             <button
               type="button"
-              onClick={handleConfigure}
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
+              className="w-full rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1d4ec9]"
+              disabled
             >
-              Configure options
+              Export PDF report →
             </button>
           </div>
-
-          <div className="flex flex-col gap-2">
-            <label htmlFor="scenarioSelect" className="text-xs text-slate-500">
-              Select option
-            </label>
-            <select
-              id="scenarioSelect"
-              value={selectedOption?.id}
-              onChange={(event) => selectOption(event.target.value)}
-              className="rounded-full border border-slate-200 bg-[#eef2ff] px-4 py-3 text-base font-semibold"
-            >
-              {options.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedOption ? (
-            <>
-              <MetricsCard option={selectedOption} />
-              <ProsCons option={selectedOption} />
-            </>
-          ) : (
-            <p className="text-sm text-slate-500">No options yet. Create one from the Blocks workshop.</p>
-          )}
         </aside>
       </div>
     </div>

@@ -6,6 +6,10 @@ export function toMeters(value: number, units: Units) {
   return units === 'imperial' ? value / FEET_IN_METER : value;
 }
 
+export function fromMeters(value: number, units: Units) {
+  return units === 'imperial' ? value * FEET_IN_METER : value;
+}
+
 export function toFeet(value: number, units: Units) {
   return units === 'metric' ? value * FEET_IN_METER : value;
 }

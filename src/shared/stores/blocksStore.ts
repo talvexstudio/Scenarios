@@ -24,7 +24,13 @@ const defaultBlock = (index: number): BlockParams => ({
   posX: index * 25,
   posY: 0,
   posZ: 0,
+  rotationZ: 0,
   defaultFunction: 'Mixed'
+});
+
+const ensureRotation = (block: BlockParams): BlockParams => ({
+  ...block,
+  rotationZ: block.rotationZ ?? 0
 });
 
 export const useBlocksStore = create<BlocksState>((set, get) => ({
@@ -46,7 +52,7 @@ export const useBlocksStore = create<BlocksState>((set, get) => ({
   resetBlocks: (model) =>
     set(() => {
       if (model) {
-        return { units: model.units, blocks: deepClone(model.blocks) };
+        return { units: model.units, blocks: deepClone(model.blocks).map(ensureRotation) };
       }
       return { units: 'metric' as Units, blocks: [defaultBlock(0)] };
     }),
@@ -55,7 +61,7 @@ export const useBlocksStore = create<BlocksState>((set, get) => ({
     return {
       schemaVersion: 1,
       units: state.units,
-      blocks: deepClone(state.blocks),
+      blocks: deepClone(state.blocks).map(ensureRotation),
       createdAt: new Date().toISOString()
     };
   }

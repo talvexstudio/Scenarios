@@ -5,17 +5,15 @@ Talvex Scenarios is now the host interface of a unified Talvex application that 
 ## Features
 - **Scenarios module** with decision panel, program metrics, auto-spin toggle, and shared renderer that visualizes immutable ScenarioOption snapshots.
 - **Blocks module** ("Talvex Blocks") workshop that edits block parameters, previews the geometry in real time, enforces the 3-option limit, and can send/replace options in Scenarios.
+- **Per-level visualization & gizmo tools** so every block renders as stacked translucent slabs, selections sync between viewport/cards, TransformControls provide move/rotate modes, and undo/redo keeps edits safe.
 - **TBK Save/Load workflow** that exports/imports pure parameter JSON snapshots; overwrite confirmation protects unsent edits.
 - **AI concept image UI** stub that captures the current viewport, accepts prompts, and simulates a generation pipeline for future backend integration.
 - **Shared domain layer** (types, unit helpers, metrics computation, renderer) plus Zustand stores for session-global units and options management.
 
 ## Getting Started
-1. Install dependencies at the repo root: 
-pm install.
-2. Run the dev server with 
-pm run dev and open the printed localhost URL (defaults to /scenarios).
-3. Build production assets via 
-pm run build (outputs to /dist).
+1. Install dependencies at the repo root: `npm install`.
+2. Run the dev server with `npm run dev` and open the printed localhost URL (defaults to `/scenarios`).
+3. Build production assets via `npm run build` (outputs to `/dist`).
 
 ## Controls & Usage
 - **Viewport**: Left-drag rotates, right-drag (or Ctrl-drag) pans, scroll zooms; toggle auto-spin in either module's canvas.

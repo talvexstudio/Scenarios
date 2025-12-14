@@ -1,12 +1,47 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import type { Vector3 } from 'three';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { nanoid } from 'nanoid';
-import { BlocksModel, ScenarioOption } from '../../shared/types';
+import { BlockFunction, BlockParams, BlocksModel, Metrics, ScenarioOption } from '../../shared/types';
 import { useBlocksStore } from '../../shared/stores/blocksStore';
 import { useScenariosStore } from '../../shared/stores/scenariosStore';
 import { computeMetricsFromBlocksModel } from '../../shared/utils/metrics';
 import { deepClone } from '../../shared/utils/clone';
 import { createMassingRenderer } from '../../shared/three/massingRenderer';
+import { formatArea, fromMeters, toMeters } from '../../shared/utils/units';
+
+type TransformState = Pick<BlockParams, 'posX' | 'posY' | 'posZ' | 'rotationZ'>;
+
+type TransformRecord = {
+  id: string;
+  prev: TransformState;
+  next: TransformState;
+};
+
+const pickTransformState = (block: BlockParams): TransformState => ({
+  posX: block.posX,
+  posY: block.posY,
+  posZ: block.posZ,
+  rotationZ: block.rotationZ ?? 0
+});
+
+const hasTransformChanged = (a: TransformState, b: TransformState) =>
+  a.posX !== b.posX || a.posY !== b.posY || a.posZ !== b.posZ || (a.rotationZ ?? 0) !== (b.rotationZ ?? 0);
+
+const buildTransformState = (
+  block: BlockParams,
+  position: Vector3,
+  rotationY: number,
+  units: BlocksModel['units']
+): TransformState => {
+  const heightMeters = toMeters(block.levelHeight * block.levels, units);
+  return {
+    posX: Number(fromMeters(position.x, units).toFixed(2)),
+    posY: Number(fromMeters(position.y - heightMeters / 2, units).toFixed(2)),
+    posZ: Number(fromMeters(position.z, units).toFixed(2)),
+    rotationZ: Number(((rotationY * 180) / Math.PI).toFixed(2))
+  };
+};
 
 export function BlocksPage() {
   const { blocks, units, addBlock, updateBlock, removeBlock, getModelSnapshot, resetBlocks, setUnits } =
@@ -22,6 +57,56 @@ export function BlocksPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<ReturnType<typeof createMassingRenderer>>();
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+  const [metricsOpen, setMetricsOpen] = useState(true);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [transformMode, setTransformMode] = useState<'translate' | 'rotate'>('translate');
+  const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const blocksRef = useRef(blocks);
+  const unitsRef = useRef(units);
+  const undoStackRef = useRef<TransformRecord[]>([]);
+  const redoStackRef = useRef<TransformRecord[]>([]);
+  const activeTransformRef = useRef<{ id: string; prev: TransformState } | null>(null);
+
+  const handleSelectBlock = useCallback((id: string | null) => {
+    setSelectedBlockId(id);
+    rendererRef.current?.setSelectedBlock(id);
+  }, []);
+
+  const captureTransformStart = useCallback((block: BlockParams | undefined) => {
+    if (!block) return;
+    if (activeTransformRef.current && activeTransformRef.current.id === block.id) return;
+    activeTransformRef.current = { id: block.id, prev: pickTransformState(block) };
+  }, []);
+
+  const finalizeTransformRecord = useCallback((id: string, nextState: TransformState) => {
+    const start = activeTransformRef.current;
+    if (!start || start.id !== id) {
+      activeTransformRef.current = null;
+      return;
+    }
+    if (hasTransformChanged(start.prev, nextState)) {
+      undoStackRef.current.push({ id, prev: start.prev, next: nextState });
+      redoStackRef.current = [];
+    }
+    activeTransformRef.current = null;
+  }, []);
+
+  const undoLast = useCallback(() => {
+    const record = undoStackRef.current.pop();
+    if (!record) return;
+    redoStackRef.current.push(record);
+    updateBlock(record.id, record.prev);
+    handleSelectBlock(record.id);
+  }, [handleSelectBlock, updateBlock]);
+
+  const redoLast = useCallback(() => {
+    const record = redoStackRef.current.pop();
+    if (!record) return;
+    undoStackRef.current.push(record);
+    updateBlock(record.id, record.next);
+    handleSelectBlock(record.id);
+  }, [handleSelectBlock, updateBlock]);
 
   const canSend = blocks.length > 0;
   const liveModel = useMemo<BlocksModel>(
@@ -44,7 +129,110 @@ export function BlocksPage() {
     rendererRef.current?.setModel(liveModel);
   }, [liveModel]);
 
-  const handleFieldChange = (id: string, field: keyof typeof blocks[number], value: string) => {
+  useEffect(() => {
+    blocksRef.current = blocks;
+  }, [blocks]);
+
+  useEffect(() => {
+    const validIds = new Set(blocks.map((block) => block.id));
+    undoStackRef.current = undoStackRef.current.filter((record) => validIds.has(record.id));
+    redoStackRef.current = redoStackRef.current.filter((record) => validIds.has(record.id));
+  }, [blocks]);
+
+  useEffect(() => {
+    unitsRef.current = units;
+  }, [units]);
+
+  useEffect(() => {
+    rendererRef.current?.setTransformMode(transformMode);
+  }, [transformMode]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setSelectionHandlers({
+      enabled: true,
+      onSelect: (id) => setSelectedBlockId(id),
+      onDeselect: () => setSelectedBlockId(null),
+      onTransformChange: ({ id }) => {
+        const currentBlocks = blocksRef.current;
+        const block = currentBlocks.find((b) => b.id === id);
+        captureTransformStart(block);
+      },
+      onTransform: ({ id, position, rotationY }) => {
+        const currentUnits = unitsRef.current;
+        const block = blocksRef.current.find((b) => b.id === id);
+        if (!block) return;
+        const nextState = buildTransformState(block, position, rotationY, currentUnits);
+        const start = activeTransformRef.current;
+        if (start && start.id === id && hasTransformChanged(start.prev, nextState)) {
+          finalizeTransformRecord(id, nextState);
+        } else {
+          activeTransformRef.current = null;
+        }
+        updateBlock(id, nextState);
+      }
+    });
+    return () => renderer.setSelectionHandlers(undefined);
+  }, [captureTransformStart, finalizeTransformRecord, updateBlock]);
+
+  useEffect(() => {
+    if (!blocks.length) {
+      setSelectedBlockId(null);
+      return;
+    }
+    if (selectedBlockId && !blocks.some((block) => block.id === selectedBlockId)) {
+      setSelectedBlockId(blocks[0].id);
+    }
+  }, [blocks, selectedBlockId]);
+
+  useEffect(() => {
+    if (selectedBlockId) {
+      blockRefs.current[selectedBlockId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    rendererRef.current?.setSelectedBlock(selectedBlockId);
+  }, [selectedBlockId]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
+      const isModifier = event.ctrlKey || event.metaKey;
+      if (isModifier && (event.key === 'z' || event.key === 'Z')) {
+        event.preventDefault();
+        undoLast();
+        return;
+      }
+      if (isModifier && (event.key === 'r' || event.key === 'R')) {
+        event.preventDefault();
+        redoLast();
+        return;
+      }
+      if (event.key === 'g' || event.key === 'G') {
+        setTransformMode('translate');
+      } else if (!isModifier && (event.key === 'r' || event.key === 'R')) {
+        setTransformMode('rotate');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [redoLast, undoLast]);
+
+  useEffect(() => {
+    setExpandedCards((prev) => {
+      const next = { ...prev };
+      blocks.forEach((block, index) => {
+        if (!(block.id in next)) {
+          next[block.id] = index === 0;
+        }
+      });
+      return next;
+    });
+  }, [blocks]);
+
+  const workshopMetrics = useMemo(() => computeMetricsFromBlocksModel(liveModel), [liveModel]);
+
+  const handleFieldChange = (id: string, field: keyof BlockParams, value: string) => {
     const numericFields: Array<keyof typeof blocks[number]> = [
       'xSize',
       'ySize',
@@ -120,172 +308,139 @@ export function BlocksPage() {
     setPendingLoad(null);
   };
 
-  const blockRows = useMemo(
-    () =>
-      blocks.map((block, index) => (
-        <tr key={block.id} className="border-b border-slate-100">
-          <td className="p-2">{block.name}</td>
-          <td className="p-2">
-            <input
-              type="number"
-              value={block.xSize}
-              onChange={(event) => handleFieldChange(block.id, 'xSize', event.target.value)}
-              className="w-20 rounded border border-slate-200 px-2 py-1 text-sm"
-            />
-          </td>
-          <td className="p-2">
-            <input
-              type="number"
-              value={block.ySize}
-              onChange={(event) => handleFieldChange(block.id, 'ySize', event.target.value)}
-              className="w-20 rounded border border-slate-200 px-2 py-1 text-sm"
-            />
-          </td>
-          <td className="p-2">
-            <input
-              type="number"
-              value={block.levels}
-              onChange={(event) => handleFieldChange(block.id, 'levels', event.target.value)}
-              className="w-16 rounded border border-slate-200 px-2 py-1 text-sm"
-            />
-          </td>
-          <td className="p-2">
-            <input
-              type="number"
-              value={block.levelHeight}
-              onChange={(event) => handleFieldChange(block.id, 'levelHeight', event.target.value)}
-              className="w-20 rounded border border-slate-200 px-2 py-1 text-sm"
-            />
-          </td>
-          <td className="p-2">
-            <input
-              type="number"
-              value={block.posX}
-              onChange={(event) => handleFieldChange(block.id, 'posX', event.target.value)}
-              className="w-20 rounded border border-slate-200 px-2 py-1 text-sm"
-            />
-          </td>
-          <td className="p-2">
-            <input
-              type="number"
-              value={block.posZ}
-              onChange={(event) => handleFieldChange(block.id, 'posZ', event.target.value)}
-              className="w-20 rounded border border-slate-200 px-2 py-1 text-sm"
-            />
-          </td>
-          <td className="p-2">
-            <select
-              value={block.defaultFunction}
-              onChange={(event) => handleFieldChange(block.id, 'defaultFunction', event.target.value)}
-              className="rounded border border-slate-200 px-2 py-1 text-sm"
-            >
-              {['Retail', 'Office', 'Residential', 'Mixed', 'Others'].map((fn) => (
-                <option key={fn} value={fn}>
-                  {fn}
-                </option>
-              ))}
-            </select>
-          </td>
-          <td className="p-2">
-            <button
-              type="button"
-              onClick={() => removeBlock(block.id)}
-              disabled={blocks.length === 1}
-              className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </td>
-        </tr>
-      )),
-    [blocks, removeBlock]
-  );
+  const duplicateBlock = (block: BlockParams) => {
+    addBlock();
+    const currentBlocks = useBlocksStore.getState().blocks;
+    const newest = currentBlocks[currentBlocks.length - 1];
+    if (newest) {
+      updateBlock(newest.id, {
+        ...block,
+        id: newest.id,
+        name: `${block.name} copy`,
+        posX: block.posX + 2,
+        posZ: block.posZ + 2,
+        rotationZ: block.rotationZ ?? 0
+      });
+    }
+  };
+
+  const toggleCard = (id: string) => {
+    setExpandedCards((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
   return (
-    <div className="flex flex-col gap-6 pb-10">
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <section className="flex-1 rounded-[24px] border border-slate-200 bg-white shadow relative min-h-[420px]">
-          <div ref={previewRef} className="w-full h-[440px] rounded-[24px] overflow-hidden bg-[#f4f6fb]" />
+    <div className="flex h-full flex-1 min-h-0 flex-col gap-6 pb-6">
+      <div className="flex flex-1 min-h-0 flex-col gap-6 lg:flex-row">
+        <section className="relative flex-1 min-h-0 overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow">
+          <div ref={previewRef} className="h-full w-full min-h-[420px] rounded-[24px] bg-[#f4f6fb]" />
+          <MetricsPanel
+            open={metricsOpen}
+            onToggle={() => setMetricsOpen((prev) => !prev)}
+            metrics={workshopMetrics}
+          />
+          {selectedBlockId && (
+            <div className="absolute bottom-5 left-5 flex items-center gap-0 rounded-full border border-white/40 bg-white/90 p-0.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#6c788f] shadow-[0_10px_30px_rgba(12,18,32,0.25)] backdrop-blur-sm">
+              <button
+                type="button"
+                onClick={() => setTransformMode('translate')}
+                className={`px-4 py-1 rounded-full transition ${
+                  transformMode === 'translate'
+                    ? 'bg-[#111a2c] text-white'
+                    : 'text-[#6c788f] hover:text-[#111a2c]'
+                }`}
+              >
+                Move
+              </button>
+              <button
+                type="button"
+                onClick={() => setTransformMode('rotate')}
+                className={`px-4 py-1 rounded-full transition ${
+                  transformMode === 'rotate'
+                    ? 'bg-[#111a2c] text-white'
+                    : 'text-[#6c788f] hover:text-[#111a2c]'
+                }`}
+              >
+                Rotate
+              </button>
+            </div>
+          )}
         </section>
 
-        <aside className="w-full lg:max-w-[420px] rounded-[24px] border border-slate-200 bg-white p-6 shadow flex flex-col gap-5">
-          <div>
-            <p className="text-xs tracking-[0.2em] uppercase text-slate-500 mb-1">Talvex Blocks Workshop</p>
-            <h1 className="text-2xl font-semibold mb-1">Build stacks &amp; export</h1>
-            <p className="text-sm text-slate-500">
-              Configure block footprints, heights, and program mix. Send immutable snapshots to the Scenarios board.
-            </p>
+        <aside className="w-full lg:max-w-[400px] rounded-[32px] border border-[#dfe4ef] bg-[#f9fafc] shadow-[0_18px_45px_rgba(15,23,42,0.15)] flex flex-col lg:sticky lg:top-6 max-h-[calc(100vh-120px)] overflow-hidden">
+          <div className="px-6 pt-7 pb-3 text-center">
+            <p className="text-xs tracking-[0.3em] uppercase text-[#7b8ba3]">Talvex Workshop</p>
+            <h1 className="text-2xl font-semibold text-[#2a3141]">Blocks</h1>
+            <div className="mx-auto mt-4 h-[2px] w-20 rounded-full bg-[#d1d6e3]" />
           </div>
 
-          <div className="flex flex-col gap-1 text-sm text-slate-600">
-            <label htmlFor="unitsSelect" className="text-xs uppercase tracking-wide text-slate-500">
-              Units
-            </label>
-            <select
-              id="unitsSelect"
-              value={units}
-              onChange={(event) => setUnits(event.target.value as typeof units)}
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm"
+          <div className="px-6 pb-4">
+            <button
+              type="button"
+              onClick={addBlock}
+              className="w-full rounded-[20px] border border-dashed border-[#c4ccdc] bg-white px-4 py-3 text-sm font-semibold text-[#48608a] hover:border-[#9aa6bf] flex items-center justify-center gap-2 transition"
             >
-              <option value="metric">Metric (m)</option>
-              <option value="imperial">Imperial (ft)</option>
-            </select>
+              <span className="text-lg leading-none text-[#4f6cd2]">+</span>
+              Add New Block
+            </button>
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex-1 overflow-y-auto px-6 pb-8 space-y-4">
+            {blocks.map((block, index) => (
+              <BlockCard
+                key={block.id}
+                block={block}
+                units={units}
+                expanded={!!expandedCards[block.id]}
+                onToggle={() => toggleCard(block.id)}
+                onChange={handleFieldChange}
+                onDuplicate={() => duplicateBlock(block)}
+                onRemove={() => removeBlock(block.id)}
+                disableRemove={blocks.length === 1}
+                showUnitsSelector={index === 0}
+                setUnits={setUnits}
+                selected={block.id === selectedBlockId}
+                onSelect={() => handleSelectBlock(block.id)}
+                registerRef={(node) => {
+                  blockRefs.current[block.id] = node;
+                }}
+              />
+            ))}
+          </div>
+
+          <div className="sticky bottom-0 border-t border-slate-200 bg-[#f9fafc] px-6 py-4 flex flex-col gap-3">
             <button
               type="button"
               onClick={handleSend}
               disabled={!canSend}
-              className="rounded-full bg-[#2563eb] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              className="rounded-full bg-[#2f6dea] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2 shadow-[0_10px_25px_rgba(37,99,235,0.35)] transition hover:bg-[#2256c8]"
             >
-              Send to Scenarios dashboard
+              Send to Scenarios <span className="text-lg leading-none">?</span>
             </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-            >
-              Save Option (.TBK)
-            </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-            >
-              Load Option (.TBK)
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleSave}
+                className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#4b5566] flex items-center justify-center gap-2"
+              >
+                <span role="img" aria-hidden="true">
+                  ??
+                </span>
+                Save .TBK
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#4b5566] flex items-center justify-center gap-2"
+              >
+                <span role="img" aria-hidden="true">
+                  ??
+                </span>
+                Load .TBK
+              </button>
+            </div>
           </div>
         </aside>
       </div>
-
-      <section className="rounded-[18px] border border-slate-200 bg-white shadow">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="p-2 text-left">Name</th>
-              <th className="p-2 text-left">Width</th>
-              <th className="p-2 text-left">Depth</th>
-              <th className="p-2 text-left">Levels</th>
-              <th className="p-2 text-left">Level H</th>
-              <th className="p-2 text-left">Pos X</th>
-              <th className="p-2 text-left">Pos Z</th>
-              <th className="p-2 text-left">Function</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>{blockRows}</tbody>
-        </table>
-        <div className="flex justify-between px-4 py-3">
-          <button
-            type="button"
-            onClick={addBlock}
-            className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-          >
-            + Add block
-          </button>
-        </div>
-      </section>
 
       <input
         type="file"
@@ -374,4 +529,344 @@ function validateTBK(model: any): asserts model is BlocksModel {
   model.blocks.forEach((block: any) => {
     if (!block.id || typeof block.name !== 'string') throw new Error('Invalid block');
   });
+}
+
+const FUNCTION_COLORS: Record<BlockFunction, { label: string; color: string }> = {
+  Retail: { label: 'Retail', color: '#f17373' },
+  Office: { label: 'Office', color: '#4f6cd2' },
+  Residential: { label: 'Residential', color: '#f6c95a' },
+  Mixed: { label: 'Mixed-use', color: '#73c6a2' },
+  Others: { label: 'Others', color: '#c5ccd6' }
+};
+
+const PROGRAM_BADGES: Record<BlockFunction, { bg: string; icon: string }> = {
+  Retail: { bg: 'bg-[#fde7e7]', icon: '🛍️' },
+  Office: { bg: 'bg-[#e3e9ff]', icon: '🏢' },
+  Residential: { bg: 'bg-[#fff3da]', icon: '🏘️' },
+  Mixed: { bg: 'bg-[#e0f6ec]', icon: '🏗️' },
+  Others: { bg: 'bg-[#e8ebf3]', icon: '⬚' }
+};
+
+type BlockCardProps = {
+  block: BlockParams;
+  units: BlocksModel['units'];
+  expanded: boolean;
+  onToggle: () => void;
+  onChange: (id: string, field: keyof BlockParams, value: string) => void;
+  onDuplicate: () => void;
+  onRemove: () => void;
+  disableRemove: boolean;
+  showUnitsSelector: boolean;
+  setUnits: (units: BlocksModel['units']) => void;
+  selected: boolean;
+  onSelect: () => void;
+  registerRef?: (node: HTMLDivElement | null) => void;
+};
+
+function BlockCard({
+  block,
+  units,
+  expanded,
+  onToggle,
+  onChange,
+  onDuplicate,
+  onRemove,
+  disableRemove,
+  showUnitsSelector,
+  setUnits,
+  selected,
+  onSelect,
+  registerRef
+}: BlockCardProps) {
+  const blockGfa = toMeters(block.xSize, units) * toMeters(block.ySize, units) * block.levels;
+  const summary = `${formatArea(blockGfa, units)} \u00b7 ${block.levels} Levels`;
+  const programColor = FUNCTION_COLORS[block.defaultFunction].color;
+  const badge = PROGRAM_BADGES[block.defaultFunction];
+
+  const cardClasses = [
+    'rounded-[28px] border border-[#e0e6f4] bg-white shadow-[0_12px_30px_rgba(32,40,62,0.08)] transition focus-within:ring-2 focus-within:ring-[#4f6cd2]/40',
+    selected ? 'border-[#4f6cd2] bg-[#edf1ff]' : ''
+  ].join(' ');
+
+  return (
+    <div
+      ref={(node) => registerRef?.(node)}
+      className={cardClasses}
+      onMouseDown={onSelect}
+      onFocusCapture={onSelect}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          onSelect();
+          onToggle();
+        }}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <div className="flex items-center gap-3">
+          <span className={`flex h-10 w-10 items-center justify-center rounded-full ${badge.bg}`}>
+            <span className="text-lg" role="img" aria-hidden="true">
+              {badge.icon}
+            </span>
+          </span>
+          <div>
+            <div className="text-sm font-semibold" style={{ color: programColor }}>
+              {block.name}
+            </div>
+            <div className="text-xs text-[#7f8aa4]">{summary}</div>
+          </div>
+        </div>
+        <span className="text-lg text-[#98a7c4]">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4 pt-1 space-y-4 text-sm text-slate-700">
+          <div className="flex items-center justify-between text-xs font-medium text-[#95a2bf]">
+            <button type="button" onClick={onDuplicate} className="flex items-center gap-1 hover:text-[#4f6cd2]">
+              <span role="img" aria-hidden="true">
+                ⎘
+              </span>
+              Duplicate
+            </button>
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={disableRemove}
+              className="flex items-center gap-1 hover:text-[#f17373] disabled:opacity-40"
+            >
+              <span role="img" aria-hidden="true">
+                🗑️
+              </span>
+              Remove
+            </button>
+          </div>
+
+          {showUnitsSelector && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Units</label>
+              <select
+                value={units}
+                onChange={(event) => setUnits(event.target.value as BlocksModel['units'])}
+                className="rounded-[16px] border border-[#d7deef] px-3 py-2 text-sm bg-white"
+              >
+                <option value="metric">Metric (m)</option>
+                <option value="imperial">Imperial (ft)</option>
+              </select>
+            </div>
+          )}
+
+          <SliderControl
+            label="Width"
+            value={block.xSize}
+            min={5}
+            max={80}
+            step={0.5}
+            onChange={(value) => onChange(block.id, 'xSize', value)}
+          />
+          <SliderControl
+            label="Depth"
+            value={block.ySize}
+            min={5}
+            max={80}
+            step={0.5}
+            onChange={(value) => onChange(block.id, 'ySize', value)}
+          />
+
+          <LevelsHeightRow
+            levels={block.levels}
+            levelHeight={block.levelHeight}
+            units={units}
+            onLevelsChange={(next) => onChange(block.id, 'levels', String(next))}
+            onHeightChange={(value) => onChange(block.id, 'levelHeight', value)}
+          />
+
+          <PositionRow block={block} onChange={onChange} />
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Program</label>
+            <select
+              value={block.defaultFunction}
+              onChange={(event) => onChange(block.id, 'defaultFunction', event.target.value)}
+              className="rounded-[16px] border border-[#d7deef] px-3 py-2 text-sm bg-white"
+            >
+              {Object.entries(FUNCTION_COLORS).map(([key, meta]) => (
+                <option key={key} value={key}>
+                  {meta.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type SliderControlProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: string) => void;
+};
+
+function SliderControl({ label, value, min, max, step, onChange }: SliderControlProps) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-[#8a95ad]">
+        <span>{label}</span>
+        <span className="text-[#111a2c] font-semibold">{Number(value).toFixed(2)}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="flex-1 accent-[#4f6cd2]"
+        />
+        <input
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={Number(value).toFixed(2)}
+          onChange={(event) => onChange(event.target.value)}
+          className="w-24 rounded-[16px] border border-[#d7deef] px-2 py-1 text-sm text-right bg-white"
+        />
+      </div>
+    </div>
+  );
+}
+
+type LevelsHeightRowProps = {
+  levels: number;
+  levelHeight: number;
+  units: BlocksModel['units'];
+  onLevelsChange: (next: number) => void;
+  onHeightChange: (value: string) => void;
+};
+
+function LevelsHeightRow({ levels, levelHeight, units, onLevelsChange, onHeightChange }: LevelsHeightRowProps) {
+  const stepLevel = (delta: number) => {
+    const next = Math.min(60, Math.max(1, levels + delta));
+    onLevelsChange(next);
+  };
+
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <div className="flex flex-col gap-2">
+        <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Levels</label>
+        <div className="flex items-center justify-between rounded-[16px] border border-[#d7deef] px-2 py-1 bg-white">
+          <button type="button" onClick={() => stepLevel(-1)} className="px-2 text-lg text-[#4f6cd2]">
+            -
+          </button>
+          <span className="text-base font-semibold">{levels}</span>
+          <button type="button" onClick={() => stepLevel(1)} className="px-2 text-lg text-[#4f6cd2]">
+            +
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Level Height (m)</label>
+        <div className="flex items-center gap-2 rounded-[16px] border border-[#d7deef] px-3 py-2 bg-white">
+          <input
+            type="number"
+            step={0.1}
+            min={2.5}
+            max={6}
+            value={Number(levelHeight).toFixed(2)}
+            onChange={(event) => onHeightChange(event.target.value)}
+            className="w-full bg-transparent text-sm"
+          />
+          <span className="text-xs text-slate-500">{units === 'metric' ? 'm' : 'ft'}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type PositionRowProps = {
+  block: BlockParams;
+  onChange: (id: string, field: keyof BlockParams, value: string) => void;
+};
+
+function PositionRow({ block, onChange }: PositionRowProps) {
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Position (x, y, z)</label>
+      <div className="grid grid-cols-3 gap-3">
+        {(['posX', 'posY', 'posZ'] as Array<keyof BlockParams>).map((axis) => (
+          <div key={axis} className="flex flex-col gap-1">
+            <span className="text-[11px] uppercase tracking-[0.2em] text-[#b3bcd3]">{axis.toUpperCase()}</span>
+            <input
+              type="number"
+              value={block[axis] as number}
+              onChange={(event) => onChange(block.id, axis, event.target.value)}
+              className="rounded-[14px] border border-[#d7deef] px-2 py-1 text-sm bg-white"
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type MetricsPanelProps = {
+  open: boolean;
+  onToggle: () => void;
+  metrics: Metrics;
+};
+
+function MetricsPanel({ open, onToggle, metrics }: MetricsPanelProps) {
+  const byFunction = Object.entries(FUNCTION_COLORS);
+  const hasValue = (key: string) => (metrics.gfaByFunction[key as BlockFunction] || 0) > 0;
+
+  return (
+    <div className="absolute left-6 top-6 w-[265px] rounded-[28px] border border-[#203047] bg-[#edf0f4] text-[#232f3f] shadow-[0_18px_38px_rgba(12,20,33,0.35)]">
+      <header className="flex items-center justify-between px-4 pt-4 pb-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-[#5f6d82]">Metrics</p>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label="Toggle metrics"
+          className="text-[#5f6d82] text-lg leading-none hover:text-[#1f2a38]"
+        >
+          {open ? '−' : '+'}
+        </button>
+      </header>
+      {open && (
+        <div className="px-4 pb-4 text-[13px] leading-5">
+          <div className="flex flex-col gap-1 border-b border-[#c5cad3] pb-3">
+            <div className="flex items-center justify-between">
+              <span>Total GFA</span>
+              <span className="font-semibold text-[#101828]">{formatArea(metrics.totalGFA, metrics.units)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Total Levels</span>
+              <span className="font-semibold text-[#101828]">{metrics.totalLevels}</span>
+            </div>
+          </div>
+
+          <div className="pt-3 text-[11px] uppercase tracking-[0.32em] text-[#5f6d82]">By Function</div>
+          <div className="mt-1 flex flex-col gap-1.5">
+            {byFunction.map(([key, meta]) => (
+              <div key={key} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: meta.color }} />
+                  <span className={hasValue(key) ? 'text-[#2563eb] font-semibold' : ''}>{meta.label}</span>
+                </div>
+                <span className="font-semibold text-[#111927]">
+                  {formatArea(metrics.gfaByFunction[key as BlockFunction] || 0, metrics.units)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
