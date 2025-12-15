@@ -14,6 +14,7 @@ import marker2x from 'leaflet/dist/images/marker-icon-2x.png';
 import marker1x from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import './scenarios.css';
+import { ArrowRight, X } from '../../shared/ui/icons';
 
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: marker2x,
@@ -258,13 +259,16 @@ export function ScenariosPage() {
             )}
           </div>
           <div className="sticky bottom-0 border-t border-slate-200 bg-white p-4">
-            <button
-              type="button"
-              className="w-full rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1d4ec9]"
-              disabled
-            >
-              Export PDF report →
-            </button>
+          <button
+            type="button"
+            className="w-full rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1d4ec9]"
+            disabled
+          >
+            <span className="inline-flex items-center justify-center gap-2">
+              Export PDF report
+              <ArrowRight className="text-white" />
+            </span>
+          </button>
           </div>
         </aside>
       </div>
@@ -277,10 +281,10 @@ export function ScenariosPage() {
               <button
                 type="button"
                 onClick={closeContextPanel}
-                className="text-slate-500 hover:text-slate-900 font-semibold"
+                className="text-slate-500 hover:text-slate-900 font-semibold inline-flex h-8 w-8 items-center justify-center rounded-full"
                 aria-label="Close"
               >
-                ✕
+                <X />
               </button>
             </div>
             <div className="space-y-4 text-sm text-slate-800">

@@ -11,6 +11,16 @@ import { RendererHost } from '../../shared/three/RendererHost';
 import { formatArea, toMeters } from '../../shared/utils/units';
 import { prepareContextPayload } from '../../shared/context/prepareContextPayload';
 import { createTBKArchive, parseTBKFile } from '../../shared/utils/tbk';
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  Copy as CopyIcon,
+  Download,
+  Plus,
+  RefreshCw,
+  Trash2
+} from '../../shared/ui/icons';
 
 export function BlocksPage() {
   const { blocks, units, addBlock, updateBlock, removeBlock, getModelSnapshot, resetBlocks, setUnits } =
@@ -225,7 +235,7 @@ export function BlocksPage() {
               onClick={addBlock}
               className="w-full rounded-[20px] border border-dashed border-[#c4ccdc] bg-white px-4 py-3 text-sm font-semibold text-[#48608a] hover:border-[#9aa6bf] flex items-center justify-center gap-2 transition"
             >
-              <span className="text-lg leading-none text-[#4f6cd2]">+</span>
+              <Plus className="text-[#4f6cd2]" />
               Add New Block
             </button>
           </div>
@@ -260,7 +270,8 @@ export function BlocksPage() {
               disabled={!canSend}
               className="rounded-full bg-[#2f6dea] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2 shadow-[0_10px_25px_rgba(37,99,235,0.35)] transition hover:bg-[#2256c8]"
             >
-              Send to Scenarios <span className="text-lg leading-none">?</span>
+              Send to Scenarios
+              <ArrowRight className="text-white" />
             </button>
             <div className="flex gap-2">
               <button
@@ -268,9 +279,7 @@ export function BlocksPage() {
                 onClick={handleSave}
                 className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#4b5566] flex items-center justify-center gap-2"
               >
-                <span role="img" aria-hidden="true">
-                  ??
-                </span>
+                <Download />
                 Save .TBK
               </button>
               <button
@@ -278,9 +287,7 @@ export function BlocksPage() {
                 onClick={() => fileInputRef.current?.click()}
                 className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#4b5566] flex items-center justify-center gap-2"
               >
-                <span role="img" aria-hidden="true">
-                  ??
-                </span>
+                <RefreshCw />
                 Load .TBK
               </button>
             </div>
@@ -466,22 +473,24 @@ function BlockCard({
           }}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#98a7c4] hover:bg-[#eef2ff]"
         >
-          {expanded ? '^' : 'v'}
+          {expanded ? <ChevronUp className="text-[#98a7c4]" /> : <ChevronDown className="text-[#98a7c4]" />}
         </button>
       </div>
 
       {expanded && (
         <div id={contentId} className="px-4 pb-4 pt-1 space-y-4 text-sm text-slate-700">
           <div className="flex items-center justify-between text-xs font-medium text-[#95a2bf]">
-            <button type="button" onClick={onDuplicate} className="hover:text-[#4f6cd2]">
+            <button type="button" onClick={onDuplicate} className="flex items-center gap-1 hover:text-[#4f6cd2]">
+              <CopyIcon className="h-4 w-4" />
               Duplicate
             </button>
             <button
               type="button"
               onClick={onRemove}
               disabled={disableRemove}
-              className="hover:text-[#f17373] disabled:opacity-40"
+              className="flex items-center gap-1 hover:text-[#f17373] disabled:opacity-40"
             >
+              <Trash2 className="h-4 w-4" />
               Remove
             </button>
           </div>
@@ -678,9 +687,9 @@ function MetricsPanel({ open, onToggle, metrics }: MetricsPanelProps) {
           type="button"
           onClick={onToggle}
           aria-label="Toggle metrics"
-          className="text-[#5f6d82] text-lg leading-none hover:text-[#1f2a38]"
+          className="text-[#5f6d82] hover:text-[#1f2a38] inline-flex h-7 w-7 items-center justify-center rounded-full transition"
         >
-          {open ? '−' : '+'}
+          {open ? <ChevronUp className="text-inherit" /> : <ChevronDown className="text-inherit" />}
         </button>
       </header>
       {open && (
