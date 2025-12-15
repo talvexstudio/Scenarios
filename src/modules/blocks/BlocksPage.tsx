@@ -1,5 +1,4 @@
-import type { Vector3 } from 'three';
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { nanoid } from 'nanoid';
 import { BlockFunction, BlockParams, BlocksModel, Metrics, ScenarioOption } from '../../shared/types';
@@ -8,48 +7,16 @@ import { useScenariosStore } from '../../shared/stores/scenariosStore';
 import { useContextStore, ContextSnapshot } from '../../shared/stores/contextStore';
 import { computeMetricsFromBlocksModel } from '../../shared/utils/metrics';
 import { deepClone } from '../../shared/utils/clone';
-import type { MassingRenderer } from '../../shared/three/massingRenderer';
 import { RendererHost } from '../../shared/three/RendererHost';
-import { formatArea, fromMeters, toMeters } from '../../shared/utils/units';
+import { formatArea, toMeters } from '../../shared/utils/units';
 import { prepareContextPayload } from '../../shared/context/prepareContextPayload';
 import { createTBKArchive, parseTBKFile } from '../../shared/utils/tbk';
-
-type TransformState = Pick<BlockParams, 'posX' | 'posY' | 'posZ' | 'rotationZ'>;
-
-type TransformRecord = {
-  id: string;
-  prev: TransformState;
-  next: TransformState;
-};
-
-const pickTransformState = (block: BlockParams): TransformState => ({
-  posX: block.posX,
-  posY: block.posY,
-  posZ: block.posZ,
-  rotationZ: block.rotationZ ?? 0
-});
-
-const hasTransformChanged = (a: TransformState, b: TransformState) =>
-  a.posX !== b.posX || a.posY !== b.posY || a.posZ !== b.posZ || (a.rotationZ ?? 0) !== (b.rotationZ ?? 0);
-
-const buildTransformState = (
-  block: BlockParams,
-  position: Vector3,
-  rotationY: number,
-  units: BlocksModel['units']
-): TransformState => {
-  const heightMeters = toMeters(block.levelHeight * block.levels, units);
-  return {
-    posX: Number(fromMeters(position.x, units).toFixed(2)),
-    posY: Number(fromMeters(position.y - heightMeters / 2, units).toFixed(2)),
-    posZ: Number(fromMeters(position.z, units).toFixed(2)),
-    rotationZ: Number(((rotationY * 180) / Math.PI).toFixed(2))
-  };
-};
 
 export function BlocksPage() {
   const { blocks, units, addBlock, updateBlock, removeBlock, getModelSnapshot, resetBlocks, setUnits } =
     useBlocksStore();
+  const selectedBlockId = useBlocksStore((state) => state.selectedBlockId);
+  const selectBlock = useBlocksStore((state) => state.selectBlock);
   const scenarios = useScenariosStore((state) => state.options);
   const addScenario = useScenariosStore((state) => state.addOption);
   const replaceScenario = useScenariosStore((state) => state.replaceOption);
@@ -66,62 +33,9 @@ export function BlocksPage() {
   const [pendingLoad, setPendingLoad] = useState<BlocksModel | null>(null);
   const [pendingContextSnapshot, setPendingContextSnapshot] = useState<ContextSnapshot | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const rendererRef = useRef<MassingRenderer | null>(null);
-  const [rendererReady, setRendererReady] = useState(false);
+  const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
   const [metricsOpen, setMetricsOpen] = useState(true);
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
-  const [transformMode, setTransformMode] = useState<'translate' | 'rotate'>('translate');
-  const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const blocksRef = useRef(blocks);
-  const unitsRef = useRef(units);
-  const undoStackRef = useRef<TransformRecord[]>([]);
-  const redoStackRef = useRef<TransformRecord[]>([]);
-  const activeTransformRef = useRef<{ id: string; prev: TransformState } | null>(null);
-  const handleRendererReady = useCallback((renderer: MassingRenderer | null) => {
-    rendererRef.current = renderer;
-    setRendererReady(!!renderer);
-  }, []);
-
-  const handleSelectBlock = useCallback((id: string | null) => {
-    setSelectedBlockId(id);
-    rendererRef.current?.setSelectedBlock(id);
-  }, []);
-
-  const captureTransformStart = useCallback((block: BlockParams | undefined) => {
-    if (!block) return;
-    if (activeTransformRef.current && activeTransformRef.current.id === block.id) return;
-    activeTransformRef.current = { id: block.id, prev: pickTransformState(block) };
-  }, []);
-
-  const finalizeTransformRecord = useCallback((id: string, nextState: TransformState) => {
-    const start = activeTransformRef.current;
-    if (!start || start.id !== id) {
-      activeTransformRef.current = null;
-      return;
-    }
-    if (hasTransformChanged(start.prev, nextState)) {
-      undoStackRef.current.push({ id, prev: start.prev, next: nextState });
-      redoStackRef.current = [];
-    }
-    activeTransformRef.current = null;
-  }, []);
-
-  const undoLast = useCallback(() => {
-    const record = undoStackRef.current.pop();
-    if (!record) return;
-    redoStackRef.current.push(record);
-    updateBlock(record.id, record.prev);
-    handleSelectBlock(record.id);
-  }, [handleSelectBlock, updateBlock]);
-
-  const redoLast = useCallback(() => {
-    const record = redoStackRef.current.pop();
-    if (!record) return;
-    undoStackRef.current.push(record);
-    updateBlock(record.id, record.next);
-    handleSelectBlock(record.id);
-  }, [handleSelectBlock, updateBlock]);
 
   const canSend = blocks.length > 0;
   const liveModel = useMemo<BlocksModel>(
@@ -135,139 +49,17 @@ export function BlocksPage() {
   );
 
   const blocksContextPayload = useMemo(() => {
-    if (!contextCenter) {
-      if (import.meta.env.DEV) {
-        console.log('[Blocks] Stage A skip: no center', {
-          count: contextBuildings.length
-        });
-      }
+    if (!contextCenter || contextBuildings.length === 0) {
       return null;
     }
-    if (contextBuildings.length === 0) {
-      if (import.meta.env.DEV) {
-        console.log('[Blocks] Stage A skip: buildings empty', {
-          center: contextCenter,
-          radius: contextRadius
-        });
-      }
-      return null;
-    }
-    if (import.meta.env.DEV) {
-      console.log('[Blocks] Stage A context input', {
-        count: contextBuildings.length,
-        center: contextCenter,
-        radius: contextRadius
-      });
-    }
-    const { payload, stats } = prepareContextPayload(
+    const { payload } = prepareContextPayload(
       contextCenter,
       contextBuildings,
       contextLastKey ?? '',
       contextRadius
     );
-    if (import.meta.env.DEV) {
-      console.log('[Blocks] Stage B context stats', stats);
-    }
     return payload;
   }, [contextCenter, contextBuildings, contextLastKey, contextRadius]);
-
-  useEffect(() => {
-    if (blocksContextPayload && !rendererReady && import.meta.env.DEV) {
-      console.log('[Blocks] Stage A note: renderer not ready', {
-        count: contextBuildings.length
-      });
-    }
-  }, [blocksContextPayload, contextBuildings.length, rendererReady]);
-
-  useEffect(() => {
-    blocksRef.current = blocks;
-  }, [blocks]);
-
-  useEffect(() => {
-    const validIds = new Set(blocks.map((block) => block.id));
-    undoStackRef.current = undoStackRef.current.filter((record) => validIds.has(record.id));
-    redoStackRef.current = redoStackRef.current.filter((record) => validIds.has(record.id));
-  }, [blocks]);
-
-  useEffect(() => {
-    unitsRef.current = units;
-  }, [units]);
-
-  useEffect(() => {
-    if (!rendererReady) return;
-    rendererRef.current?.setTransformMode(transformMode);
-  }, [rendererReady, transformMode]);
-
-  useEffect(() => {
-    const renderer = rendererRef.current;
-    if (!rendererReady || !renderer) return;
-    renderer.setSelectionHandlers({
-      enabled: true,
-      onSelect: (id) => setSelectedBlockId(id),
-      onDeselect: () => setSelectedBlockId(null),
-      onTransformChange: ({ id }) => {
-        const currentBlocks = blocksRef.current;
-        const block = currentBlocks.find((b) => b.id === id);
-        captureTransformStart(block);
-      },
-      onTransform: ({ id, position, rotationY }) => {
-        const currentUnits = unitsRef.current;
-        const block = blocksRef.current.find((b) => b.id === id);
-        if (!block) return;
-        const nextState = buildTransformState(block, position, rotationY, currentUnits);
-        const start = activeTransformRef.current;
-        if (start && start.id === id && hasTransformChanged(start.prev, nextState)) {
-          finalizeTransformRecord(id, nextState);
-        } else {
-          activeTransformRef.current = null;
-        }
-        updateBlock(id, nextState);
-      }
-    });
-    return () => renderer.setSelectionHandlers(undefined);
-  }, [rendererReady, captureTransformStart, finalizeTransformRecord, updateBlock]);
-
-  useEffect(() => {
-    if (!blocks.length) {
-      setSelectedBlockId(null);
-      return;
-    }
-    if (selectedBlockId && !blocks.some((block) => block.id === selectedBlockId)) {
-      setSelectedBlockId(blocks[0].id);
-    }
-  }, [blocks, selectedBlockId]);
-
-  useEffect(() => {
-    if (selectedBlockId) {
-      blockRefs.current[selectedBlockId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-    rendererRef.current?.setSelectedBlock(selectedBlockId);
-  }, [selectedBlockId, rendererReady]);
-
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
-      const isModifier = event.ctrlKey || event.metaKey;
-      if (isModifier && (event.key === 'z' || event.key === 'Z')) {
-        event.preventDefault();
-        undoLast();
-        return;
-      }
-      if (isModifier && (event.key === 'r' || event.key === 'R')) {
-        event.preventDefault();
-        redoLast();
-        return;
-      }
-      if (event.key === 'g' || event.key === 'G') {
-        setTransformMode('translate');
-      } else if (!isModifier && (event.key === 'r' || event.key === 'R')) {
-        setTransformMode('rotate');
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [redoLast, undoLast]);
 
   useEffect(() => {
     setExpandedCards((prev) => {
@@ -280,6 +72,22 @@ export function BlocksPage() {
       return next;
     });
   }, [blocks]);
+
+  useEffect(() => {
+    if (!blocks.length) {
+      selectBlock(null);
+      return;
+    }
+    if (selectedBlockId && !blocks.some((block) => block.id === selectedBlockId)) {
+      selectBlock(blocks[0].id);
+    }
+  }, [blocks, selectedBlockId, selectBlock]);
+
+  useEffect(() => {
+    if (selectedBlockId) {
+      blockRefs.current[selectedBlockId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedBlockId]);
 
   const workshopMetrics = useMemo(() => computeMetricsFromBlocksModel(liveModel), [liveModel]);
 
@@ -393,7 +201,8 @@ export function BlocksPage() {
           <RendererHost
             model={liveModel}
             context={blocksContextPayload}
-            onReady={handleRendererReady}
+            selectedBlockId={selectedBlockId}
+            onPickBlock={selectBlock}
             className="h-full w-full min-h-[420px] rounded-[24px] bg-[#f4f6fb]"
           />
           <MetricsPanel
@@ -401,32 +210,6 @@ export function BlocksPage() {
             onToggle={() => setMetricsOpen((prev) => !prev)}
             metrics={workshopMetrics}
           />
-          {selectedBlockId && (
-            <div className="absolute bottom-5 left-5 flex items-center gap-0 rounded-full border border-white/40 bg-white/90 p-0.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#6c788f] shadow-[0_10px_30px_rgba(12,18,32,0.25)] backdrop-blur-sm">
-              <button
-                type="button"
-                onClick={() => setTransformMode('translate')}
-                className={`px-4 py-1 rounded-full transition ${
-                  transformMode === 'translate'
-                    ? 'bg-[#111a2c] text-white'
-                    : 'text-[#6c788f] hover:text-[#111a2c]'
-                }`}
-              >
-                Move
-              </button>
-              <button
-                type="button"
-                onClick={() => setTransformMode('rotate')}
-                className={`px-4 py-1 rounded-full transition ${
-                  transformMode === 'rotate'
-                    ? 'bg-[#111a2c] text-white'
-                    : 'text-[#6c788f] hover:text-[#111a2c]'
-                }`}
-              >
-                Rotate
-              </button>
-            </div>
-          )}
         </section>
 
         <aside className="w-full lg:max-w-[400px] rounded-[32px] border border-[#dfe4ef] bg-[#f9fafc] shadow-[0_18px_45px_rgba(15,23,42,0.15)] flex flex-col lg:sticky lg:top-6 max-h-[calc(100vh-120px)] overflow-hidden">
@@ -462,7 +245,7 @@ export function BlocksPage() {
                 showUnitsSelector={index === 0}
                 setUnits={setUnits}
                 selected={block.id === selectedBlockId}
-                onSelect={() => handleSelectBlock(block.id)}
+                onSelect={() => selectBlock(block.id)}
                 registerRef={(node) => {
                   blockRefs.current[block.id] = node;
                 }}
@@ -645,11 +428,11 @@ function BlockCard({
   const summary = `${formatArea(blockGfa, units)} \u00b7 ${block.levels} Levels`;
   const programColor = FUNCTION_COLORS[block.defaultFunction].color;
   const badge = PROGRAM_BADGES[block.defaultFunction];
-
   const cardClasses = [
     'rounded-[28px] border border-[#e0e6f4] bg-white shadow-[0_12px_30px_rgba(32,40,62,0.08)] transition focus-within:ring-2 focus-within:ring-[#4f6cd2]/40',
-    selected ? 'border-[#4f6cd2] bg-[#edf1ff]' : ''
+    selected ? 'border-[#4f6cd2] bg-[#edf1ff] ring-2 ring-offset-2 ring-offset-[#f6f8ff] ring-[#4f6cd2]/60' : ''
   ].join(' ');
+  const contentId = `block-card-${block.id}`;
 
   return (
     <div
@@ -658,15 +441,8 @@ function BlockCard({
       onMouseDown={onSelect}
       onFocusCapture={onSelect}
     >
-      <button
-        type="button"
-        onClick={() => {
-          onSelect();
-          onToggle();
-        }}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-      >
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <button type="button" onClick={onSelect} className="flex flex-1 items-center gap-3 text-left">
           <span className={`flex h-10 w-10 items-center justify-center rounded-full ${badge.bg}`}>
             <span className="text-lg" role="img" aria-hidden="true">
               {badge.icon}
@@ -678,28 +454,34 @@ function BlockCard({
             </div>
             <div className="text-xs text-[#7f8aa4]">{summary}</div>
           </div>
-        </div>
-        <span className="text-lg text-[#98a7c4]">{expanded ? '▲' : '▼'}</span>
-      </button>
+        </button>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect();
+            onToggle();
+          }}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#98a7c4] hover:bg-[#eef2ff]"
+        >
+          {expanded ? '^' : 'v'}
+        </button>
+      </div>
 
       {expanded && (
-        <div className="px-4 pb-4 pt-1 space-y-4 text-sm text-slate-700">
+        <div id={contentId} className="px-4 pb-4 pt-1 space-y-4 text-sm text-slate-700">
           <div className="flex items-center justify-between text-xs font-medium text-[#95a2bf]">
-            <button type="button" onClick={onDuplicate} className="flex items-center gap-1 hover:text-[#4f6cd2]">
-              <span role="img" aria-hidden="true">
-                ⎘
-              </span>
+            <button type="button" onClick={onDuplicate} className="hover:text-[#4f6cd2]">
               Duplicate
             </button>
             <button
               type="button"
               onClick={onRemove}
               disabled={disableRemove}
-              className="flex items-center gap-1 hover:text-[#f17373] disabled:opacity-40"
+              className="hover:text-[#f17373] disabled:opacity-40"
             >
-              <span role="img" aria-hidden="true">
-                🗑️
-              </span>
               Remove
             </button>
           </div>

@@ -8,9 +8,19 @@ type RendererHostProps = {
   autoSpin?: boolean;
   onReady?: (renderer: MassingRenderer | null) => void;
   className?: string;
+  selectedBlockId?: string | null;
+  onPickBlock?: (id: string | null) => void;
 };
 
-export function RendererHost({ model, context, autoSpin = false, onReady, className }: RendererHostProps) {
+export function RendererHost({
+  model,
+  context,
+  autoSpin = false,
+  onReady,
+  className,
+  selectedBlockId = null,
+  onPickBlock
+}: RendererHostProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<MassingRenderer | null>(null);
   const readyCallbackRef = useRef(onReady);
@@ -56,6 +66,14 @@ export function RendererHost({ model, context, autoSpin = false, onReady, classN
   useEffect(() => {
     rendererRef.current?.setAutoSpin(!!autoSpin);
   }, [autoSpin]);
+
+  useEffect(() => {
+    rendererRef.current?.setSelectedBlock(selectedBlockId ?? null);
+  }, [selectedBlockId]);
+
+  useEffect(() => {
+    rendererRef.current?.setPickHandler(onPickBlock);
+  }, [onPickBlock]);
 
   return <div ref={containerRef} className={className ?? 'h-full w-full'} />;
 }
