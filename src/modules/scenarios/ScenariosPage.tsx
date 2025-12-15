@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useScenariosStore } from '../../shared/stores/scenariosStore';
-import { createMassingRenderer } from '../../shared/three/massingRenderer';
 import { useContextStore } from '../../shared/stores/contextStore';
+import { prepareContextPayload } from '../../shared/context/prepareContextPayload';
 import { ScenarioOption } from '../../shared/types';
 import { formatArea } from '../../shared/utils/units';
+import { RendererHost } from '../../shared/three/RendererHost';
+import type { MassingRenderer } from '../../shared/three/massingRenderer';
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -20,15 +22,13 @@ L.Icon.Default.mergeOptions({
 });
 
 export function ScenariosPage() {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<ReturnType<typeof createMassingRenderer>>();
+  const rendererHandleRef = useRef<MassingRenderer | null>(null);
   const [autoSpin, setAutoSpin] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [latInput, setLatInput] = useState('');
   const [lonInput, setLonInput] = useState('');
   const [radiusChoice, setRadiusChoice] = useState<number>(100);
   const [contextError, setContextError] = useState('');
-
   const options = useScenariosStore((state) => state.options);
   const selectedId = useScenariosStore((state) => state.selectedOptionId);
   const selectOption = useScenariosStore((state) => state.selectOption);
@@ -39,17 +39,26 @@ export function ScenariosPage() {
   const status = useContextStore((state) => state.status);
   const errorMessage = useContextStore((state) => state.error);
   const buildingsCount = useContextStore((state) => state.buildingsCount);
+  const contextBuildings = useContextStore((state) => state.buildings);
+  const lastFetchedKey = useContextStore((state) => state.lastFetchedKey);
   const setCenter = useContextStore((state) => state.setCenter);
   const setRadiusM = useContextStore((state) => state.setRadiusM);
   const clearContext = useContextStore((state) => state.clearContext);
   const fetchContext = useContextStore((state) => state.fetchContext);
   const cancelFetch = useContextStore((state) => state.cancelFetch);
+  const hasContextHydrated = useContextStore((state) => state.hasHydrated);
   const numericLat = Number(latInput);
   const numericLon = Number(lonInput);
   const hasPoint = Number.isFinite(numericLat) && Number.isFinite(numericLon);
   const defaultLat = hasPoint ? numericLat : center?.lat ?? 0;
   const defaultLon = hasPoint ? numericLon : center?.lon ?? 0;
   const fallbackCenter = useMemo<[number, number]>(() => [defaultLat, defaultLon], [defaultLat, defaultLon]);
+
+  useEffect(() => {
+    if (hasContextHydrated && import.meta.env.DEV) {
+      console.log('[Scenarios] Context hydration complete', { buildings: contextBuildings.length });
+    }
+  }, [hasContextHydrated, contextBuildings.length]);
 
   useEffect(() => {
     seedIfEmpty();
@@ -60,20 +69,50 @@ export function ScenariosPage() {
     [options, selectedId]
   );
 
-  useEffect(() => {
-    if (!canvasRef.current) return;
-    rendererRef.current = createMassingRenderer(canvasRef.current);
-    return () => rendererRef.current?.dispose();
-  }, []);
+  const contextPayload = useMemo(() => {
+    if (!center) {
+      if (import.meta.env.DEV) {
+        console.log('[Scenarios] contextPayload -> null', { reason: 'no center', count: contextBuildings.length });
+      }
+      return null;
+    }
+    if (contextBuildings.length === 0) {
+      if (import.meta.env.DEV) {
+        console.log('[Scenarios] contextPayload -> null', {
+          reason: 'buildings empty',
+          center,
+          radiusM
+        });
+      }
+      return null;
+    }
+    if (import.meta.env.DEV) {
+      console.log('[Scenarios] Stage A context input', {
+        count: contextBuildings.length,
+        center,
+        radiusM
+      });
+    }
+    const { payload, stats } = prepareContextPayload(center, contextBuildings, lastFetchedKey ?? '', radiusM);
+    if (import.meta.env.DEV) {
+      console.log('[Scenarios] Stage B context stats', stats);
+    }
+    if (!payload) {
+      if (import.meta.env.DEV) {
+        console.log('[Scenarios] contextPayload -> null', { reason: 'payload empty', stats });
+      }
+      return null;
+    }
+    return payload;
+  }, [center, contextBuildings, lastFetchedKey, radiusM]);
 
   useEffect(() => {
-    if (!rendererRef.current) return;
-    rendererRef.current.setModel(selectedOption?.model);
-  }, [selectedOption]);
-
-  useEffect(() => {
-    rendererRef.current?.setAutoSpin(autoSpin);
-  }, [autoSpin]);
+    if (contextPayload && !rendererHandleRef.current && import.meta.env.DEV) {
+      console.log('[Scenarios] Stage A note: renderer not ready', {
+        count: contextBuildings.length
+      });
+    }
+  }, [contextPayload, contextBuildings.length]);
 
   const handleConfigure = () => navigate('/blocks');
 
@@ -130,11 +169,23 @@ export function ScenariosPage() {
     setContextError('');
   };
 
+  const handleZoomContext = () => {
+    rendererHandleRef.current?.frameContext();
+  };
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
       <div className="flex flex-1 min-h-0 flex-col lg:flex-row gap-6">
         <section className="flex-1 min-h-0 rounded-[24px] border border-slate-200 bg-white shadow relative">
-          <div ref={canvasRef} className="w-full h-full rounded-[24px] overflow-hidden bg-[#f4f6fb]" />
+          <RendererHost
+            model={selectedOption?.model ?? null}
+            context={contextPayload}
+            autoSpin={autoSpin}
+            onReady={(renderer) => {
+              rendererHandleRef.current = renderer;
+            }}
+            className="w-full h-full rounded-[24px] overflow-hidden bg-[#f4f6fb]"
+          />
           <button
             type="button"
             aria-pressed={autoSpin}
@@ -305,6 +356,15 @@ export function ScenariosPage() {
               >
                 Clear
               </button>
+              {import.meta.env.DEV && (
+                <button
+                  type="button"
+                  onClick={handleZoomContext}
+                  className="rounded-full border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700"
+                >
+                  Zoom to context
+                </button>
+              )}
               <div className="flex gap-2">
                 <button
                   type="button"

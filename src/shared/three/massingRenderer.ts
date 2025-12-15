@@ -4,6 +4,12 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { BlocksModel, BlockFunction, Units } from '../types';
 import { fromMeters, toMeters } from '../utils/units';
 
+export const MAX_CONTEXT_BUILDINGS = 600;
+const CONTEXT_BATCH_SIZE = 20;
+const CONTEXT_COLOR = 0x48505f;
+const DEBUG_CONTEXT = true;
+let rendererInstanceCounter = 0;
+
 type SelectionHandlers = {
   enabled: boolean;
   onSelect?: (blockId: string | null) => void;
@@ -14,16 +20,26 @@ type SelectionHandlers = {
   redo?: () => void;
 };
 
+export type ContextMeshPayload = {
+  id: string;
+  height: number;
+  footprint: Array<[number, number]>;
+};
+
 export type MassingRenderer = {
   setModel: (model?: BlocksModel) => void;
   setAutoSpin: (enabled: boolean) => void;
   setSelectionHandlers: (handlers?: SelectionHandlers) => void;
   setSelectedBlock: (blockId: string | null) => void;
   setTransformMode: (mode: 'translate' | 'rotate') => void;
+  setContext: (payload: ContextMeshPayload[] | null | undefined) => Promise<void>;
+  frameContext: () => boolean;
   dispose: () => void;
+  instanceId: number;
 };
 
 export function createMassingRenderer(container: HTMLElement): MassingRenderer {
+  const instanceId = ++rendererInstanceCounter;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x65788b);
 
@@ -71,6 +87,20 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
 
   const massingGroup = new THREE.Group();
   scene.add(massingGroup);
+  const contextGroup = new THREE.Group();
+  contextGroup.position.y = -0.05;
+  scene.add(contextGroup);
+  const contextBounds = new THREE.Box3();
+  if (DEBUG_CONTEXT && import.meta.env.DEV) {
+    console.log(`[Renderer ${instanceId}] created`, { contextGroupId: contextGroup.uuid });
+  }
+  let bboxHelper: THREE.Box3Helper | null = null;
+  if (DEBUG_CONTEXT && import.meta.env.DEV) {
+    scene.add(new THREE.AxesHelper(20));
+    bboxHelper = new THREE.Box3Helper(new THREE.Box3(), 0xffff88);
+    bboxHelper.visible = false;
+    scene.add(bboxHelper);
+  }
 
   const blockMeshes = new Map<string, THREE.Group>();
   const raycaster = new THREE.Raycaster();
@@ -92,6 +122,7 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   let selectionHandlers: SelectionHandlers | undefined;
   let selectionEnabled = false;
   let selectedBlockId: string | null = null;
+  let contextBuildToken = 0;
 
   const handleResize = () => {
     const w = container.clientWidth || width;
@@ -112,6 +143,7 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
     raf = requestAnimationFrame(animate);
     if (autoSpin) {
       massingGroup.rotation.y += 0.002;
+      contextGroup.rotation.y += 0.002;
     }
     controls.update();
     renderer.render(scene, camera);
@@ -189,7 +221,22 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
 
   renderer.domElement.addEventListener('pointerdown', handlePointerDown);
 
+  const logContextChildren = (stage: string) => {
+    if (!DEBUG_CONTEXT || !import.meta.env.DEV) return;
+    console.log(`[Renderer ${instanceId}] ${stage}`, {
+      contextChildren: contextGroup.children.length,
+      contextGroupId: contextGroup.uuid
+    });
+  };
+
+  const updateContextHelper = () => {
+    if (!bboxHelper || !DEBUG_CONTEXT || !import.meta.env.DEV) return;
+    bboxHelper.box.copy(contextBounds);
+    bboxHelper.visible = !contextBounds.isEmpty();
+  };
+
   const setModel = (model?: BlocksModel) => {
+    logContextChildren('setModel/start');
     if (!model) {
       blockMeshes.forEach((group) => {
         massingGroup.remove(group);
@@ -230,16 +277,7 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
         selectBlock(null);
       }
     }
-  };
-
-  const dispose = () => {
-    cancelAnimationFrame(raf);
-    window.removeEventListener('resize', handleResize);
-    resizeObserver?.disconnect();
-    renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
-    controls.dispose();
-    renderer.dispose();
-    container.innerHTML = '';
+    logContextChildren('setModel/end');
   };
 
   return {
@@ -262,7 +300,72 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
     setTransformMode: (mode: 'translate' | 'rotate') => {
       transformControls.setMode(mode);
     },
-    dispose
+    setContext: (payload: ContextMeshPayload[] | null | undefined) => {
+      if (typeof payload === 'undefined') {
+        if (import.meta.env?.DEV) {
+          console.warn('[massingRenderer] setContext called with undefined payload.');
+        }
+        payload = null;
+      }
+      if (import.meta.env.DEV) {
+        console.log(`[Renderer ${instanceId}] setContext called`, {
+          isNull: !payload,
+          receivedCount: payload?.length ?? 0
+        });
+      }
+      contextBuildToken += 1;
+      const token = contextBuildToken;
+      return buildContextGeometry(payload, contextGroup, () => token === contextBuildToken, instanceId).then(
+        (builtCount) => {
+          contextBounds.makeEmpty();
+          if (contextGroup.children.length > 0) {
+            contextBounds.expandByObject(contextGroup);
+          }
+          if (import.meta.env.DEV) {
+            const size = contextBounds.getSize(new THREE.Vector3());
+            const center = contextBounds.getCenter(new THREE.Vector3());
+            console.log('[Renderer] context bbox', {
+              instanceId,
+              contextChildren: contextGroup.children.length,
+              contextGroupId: contextGroup.uuid,
+              bboxMin: contextBounds.min.toArray(),
+              bboxMax: contextBounds.max.toArray(),
+              bboxSize: size.toArray(),
+              bboxCenter: center.toArray()
+            });
+            console.log('[Renderer] context build summary', {
+              instanceId,
+              builtCount
+            });
+          }
+          logContextChildren('setContext/after-build');
+          updateContextHelper();
+        }
+      );
+    },
+    frameContext: () => {
+      if (contextGroup.children.length === 0 || contextBounds.isEmpty()) return false;
+      const center = contextBounds.getCenter(new THREE.Vector3());
+      const size = contextBounds.getSize(new THREE.Vector3());
+      const distance = Math.max(size.length(), 40);
+      controls.target.copy(center);
+      const offset = new THREE.Vector3(1, 0.6, 1).normalize().multiplyScalar(distance);
+      camera.position.copy(center.clone().add(offset));
+      camera.updateProjectionMatrix();
+      controls.update();
+      return true;
+    },
+    dispose: () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', handleResize);
+      resizeObserver?.disconnect();
+      renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
+      controls.dispose();
+      renderer.dispose();
+      contextGroup.clear();
+      container.innerHTML = '';
+    },
+    instanceId
   };
 }
 
@@ -477,4 +580,111 @@ function getFunctionColor(fn: BlockFunction) {
     default:
       return 0xb1b1b1;
   }
+}
+
+function buildContextGeometry(
+  payload: ContextMeshPayload[] | null,
+  targetGroup: THREE.Group,
+  isCurrent: () => boolean,
+  instanceId: number
+): Promise<number> {
+  clearGroup(targetGroup);
+  if (!payload || payload.length === 0) {
+    if (import.meta.env.DEV) {
+      console.log(`[Renderer ${instanceId}] buildContext start`, { receivedCount: 0 });
+    }
+    return Promise.resolve(0);
+  }
+
+  const items = payload.slice(0, MAX_CONTEXT_BUILDINGS);
+  if (import.meta.env.DEV) {
+    console.log(`[Renderer ${instanceId}] buildContext start`, { receivedCount: items.length });
+  }
+  let index = 0;
+  let built = 0;
+
+  const schedule = (fn: () => void) => {
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(fn);
+    } else {
+      setTimeout(fn, 16);
+    }
+  };
+
+  return new Promise((resolve) => {
+    const processChunk = () => {
+      if (!isCurrent()) {
+        clearGroup(targetGroup);
+        resolve(0);
+        return;
+      }
+
+      const limit = Math.min(index + CONTEXT_BATCH_SIZE, items.length);
+      for (; index < limit; index++) {
+        const mesh = createContextMesh(items[index]);
+        if (mesh) {
+          targetGroup.add(mesh);
+          built += 1;
+        }
+      }
+
+      if (index < items.length) {
+        schedule(processChunk);
+      } else {
+        if (built === 0 && import.meta.env.DEV) {
+          items.slice(0, 3).forEach((item, idx) => {
+            console.log(`[Renderer ${instanceId}] context item sample ${idx}`, {
+              id: item.id,
+              points: item.footprint.slice(0, 3)
+            });
+          });
+        }
+        resolve(built);
+      }
+    };
+
+    processChunk();
+  });
+}
+
+function createContextMesh(payload: ContextMeshPayload) {
+  if (!payload.footprint || payload.footprint.length < 3 || !Number.isFinite(payload.height) || payload.height <= 0) {
+    return null;
+  }
+
+  const shape = new THREE.Shape();
+  payload.footprint.forEach(([x, z], index) => {
+    const yCoord = -z;
+    if (index === 0) {
+      shape.moveTo(x, yCoord);
+    } else {
+      shape.lineTo(x, yCoord);
+    }
+  });
+  shape.closePath();
+
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: payload.height, bevelEnabled: false, steps: 1 });
+  geometry.rotateX(-Math.PI / 2);
+
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshStandardMaterial({
+      color: CONTEXT_COLOR,
+      transparent: true,
+      opacity: 0.55,
+      roughness: 0.95,
+      metalness: 0.05
+    })
+  );
+  mesh.castShadow = false;
+  mesh.receiveShadow = true;
+  mesh.userData.isContext = true;
+  return mesh;
+}
+
+function clearGroup(group: THREE.Group) {
+  [...group.children].forEach((child) => {
+    group.remove(child);
+    disposeObject(child);
+  });
 }

@@ -5,10 +5,14 @@ import { nanoid } from 'nanoid';
 import { BlockFunction, BlockParams, BlocksModel, Metrics, ScenarioOption } from '../../shared/types';
 import { useBlocksStore } from '../../shared/stores/blocksStore';
 import { useScenariosStore } from '../../shared/stores/scenariosStore';
+import { useContextStore, ContextSnapshot } from '../../shared/stores/contextStore';
 import { computeMetricsFromBlocksModel } from '../../shared/utils/metrics';
 import { deepClone } from '../../shared/utils/clone';
-import { createMassingRenderer } from '../../shared/three/massingRenderer';
+import type { MassingRenderer } from '../../shared/three/massingRenderer';
+import { RendererHost } from '../../shared/three/RendererHost';
 import { formatArea, fromMeters, toMeters } from '../../shared/utils/units';
+import { prepareContextPayload } from '../../shared/context/prepareContextPayload';
+import { createTBKArchive, parseTBKFile } from '../../shared/utils/tbk';
 
 type TransformState = Pick<BlockParams, 'posX' | 'posY' | 'posZ' | 'rotationZ'>;
 
@@ -50,13 +54,20 @@ export function BlocksPage() {
   const addScenario = useScenariosStore((state) => state.addOption);
   const replaceScenario = useScenariosStore((state) => state.replaceOption);
   const selectScenario = useScenariosStore((state) => state.selectOption);
+  const contextCenter = useContextStore((state) => state.center);
+  const contextBuildings = useContextStore((state) => state.buildings);
+  const contextRadius = useContextStore((state) => state.radiusM);
+  const contextLastKey = useContextStore((state) => state.lastFetchedKey);
+  const getContextSnapshotForSave = useContextStore((state) => state.getSnapshotForSave);
+  const applyContextSnapshot = useContextStore((state) => state.setSnapshot);
   const navigate = useNavigate();
 
   const [replaceCandidate, setReplaceCandidate] = useState<ScenarioOption | null>(null);
   const [pendingLoad, setPendingLoad] = useState<BlocksModel | null>(null);
+  const [pendingContextSnapshot, setPendingContextSnapshot] = useState<ContextSnapshot | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<ReturnType<typeof createMassingRenderer>>();
+  const rendererRef = useRef<MassingRenderer | null>(null);
+  const [rendererReady, setRendererReady] = useState(false);
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
   const [metricsOpen, setMetricsOpen] = useState(true);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
@@ -67,6 +78,10 @@ export function BlocksPage() {
   const undoStackRef = useRef<TransformRecord[]>([]);
   const redoStackRef = useRef<TransformRecord[]>([]);
   const activeTransformRef = useRef<{ id: string; prev: TransformState } | null>(null);
+  const handleRendererReady = useCallback((renderer: MassingRenderer | null) => {
+    rendererRef.current = renderer;
+    setRendererReady(!!renderer);
+  }, []);
 
   const handleSelectBlock = useCallback((id: string | null) => {
     setSelectedBlockId(id);
@@ -119,15 +134,50 @@ export function BlocksPage() {
     [blocks, units]
   );
 
-  useEffect(() => {
-    if (!previewRef.current) return;
-    rendererRef.current = createMassingRenderer(previewRef.current);
-    return () => rendererRef.current?.dispose();
-  }, []);
+  const blocksContextPayload = useMemo(() => {
+    if (!contextCenter) {
+      if (import.meta.env.DEV) {
+        console.log('[Blocks] Stage A skip: no center', {
+          count: contextBuildings.length
+        });
+      }
+      return null;
+    }
+    if (contextBuildings.length === 0) {
+      if (import.meta.env.DEV) {
+        console.log('[Blocks] Stage A skip: buildings empty', {
+          center: contextCenter,
+          radius: contextRadius
+        });
+      }
+      return null;
+    }
+    if (import.meta.env.DEV) {
+      console.log('[Blocks] Stage A context input', {
+        count: contextBuildings.length,
+        center: contextCenter,
+        radius: contextRadius
+      });
+    }
+    const { payload, stats } = prepareContextPayload(
+      contextCenter,
+      contextBuildings,
+      contextLastKey ?? '',
+      contextRadius
+    );
+    if (import.meta.env.DEV) {
+      console.log('[Blocks] Stage B context stats', stats);
+    }
+    return payload;
+  }, [contextCenter, contextBuildings, contextLastKey, contextRadius]);
 
   useEffect(() => {
-    rendererRef.current?.setModel(liveModel);
-  }, [liveModel]);
+    if (blocksContextPayload && !rendererReady && import.meta.env.DEV) {
+      console.log('[Blocks] Stage A note: renderer not ready', {
+        count: contextBuildings.length
+      });
+    }
+  }, [blocksContextPayload, contextBuildings.length, rendererReady]);
 
   useEffect(() => {
     blocksRef.current = blocks;
@@ -144,12 +194,13 @@ export function BlocksPage() {
   }, [units]);
 
   useEffect(() => {
+    if (!rendererReady) return;
     rendererRef.current?.setTransformMode(transformMode);
-  }, [transformMode]);
+  }, [rendererReady, transformMode]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
-    if (!renderer) return;
+    if (!rendererReady || !renderer) return;
     renderer.setSelectionHandlers({
       enabled: true,
       onSelect: (id) => setSelectedBlockId(id),
@@ -174,7 +225,7 @@ export function BlocksPage() {
       }
     });
     return () => renderer.setSelectionHandlers(undefined);
-  }, [captureTransformStart, finalizeTransformRecord, updateBlock]);
+  }, [rendererReady, captureTransformStart, finalizeTransformRecord, updateBlock]);
 
   useEffect(() => {
     if (!blocks.length) {
@@ -191,7 +242,7 @@ export function BlocksPage() {
       blockRefs.current[selectedBlockId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
     rendererRef.current?.setSelectedBlock(selectedBlockId);
-  }, [selectedBlockId]);
+  }, [selectedBlockId, rendererReady]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -267,45 +318,52 @@ export function BlocksPage() {
     navigate('/scenarios');
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const model = getModelSnapshot();
-    const blob = new Blob([JSON.stringify(model, null, 2)], { type: 'application/json' });
-    const timestamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${timestamp}_Talvex_block.TBK`;
-    link.click();
-    URL.revokeObjectURL(url);
+    const contextSnapshot = getContextSnapshotForSave();
+    try {
+      const blob = await createTBKArchive(model, contextSnapshot);
+      const timestamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${timestamp}_Talvex_block.TBK`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(error);
+      alert('Failed to save TBK file.');
+    }
   };
 
-  const handleLoad = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleLoad = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const json = JSON.parse(String(reader.result));
-        validateTBK(json);
-        setPendingLoad(json);
-      } catch (error) {
-        alert('Invalid TBK file.');
-      } finally {
-        event.target.value = '';
-      }
-    };
-    reader.readAsText(file);
+    try {
+      const { model, context } = await parseTBKFile(file);
+      validateTBK(model);
+      setPendingLoad(model);
+      setPendingContextSnapshot(context);
+    } catch (error) {
+      console.error(error);
+      alert('Invalid TBK file.');
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const confirmLoad = () => {
     if (pendingLoad) {
       resetBlocks(pendingLoad);
+      applyContextSnapshot(pendingContextSnapshot);
       setPendingLoad(null);
+      setPendingContextSnapshot(null);
     }
   };
 
   const cancelLoad = () => {
     setPendingLoad(null);
+    setPendingContextSnapshot(null);
   };
 
   const duplicateBlock = (block: BlockParams) => {
@@ -332,7 +390,12 @@ export function BlocksPage() {
     <div className="flex h-full flex-1 min-h-0 flex-col gap-6 pb-6">
       <div className="flex flex-1 min-h-0 flex-col gap-6 lg:flex-row">
         <section className="relative flex-1 min-h-0 overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow">
-          <div ref={previewRef} className="h-full w-full min-h-[420px] rounded-[24px] bg-[#f4f6fb]" />
+          <RendererHost
+            model={liveModel}
+            context={blocksContextPayload}
+            onReady={handleRendererReady}
+            className="h-full w-full min-h-[420px] rounded-[24px] bg-[#f4f6fb]"
+          />
           <MetricsPanel
             open={metricsOpen}
             onToggle={() => setMetricsOpen((prev) => !prev)}
