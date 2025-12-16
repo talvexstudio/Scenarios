@@ -1,24 +1,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { BlocksModel, BlockFunction, Units } from '../types';
-import { fromMeters, toMeters } from '../utils/units';
+import { toMeters } from '../utils/units';
 
 export const MAX_CONTEXT_BUILDINGS = 600;
 const CONTEXT_BATCH_SIZE = 20;
 const CONTEXT_COLOR = 0x48505f;
 const DEBUG_CONTEXT = true;
 let rendererInstanceCounter = 0;
-
-type SelectionHandlers = {
-  enabled: boolean;
-  onSelect?: (blockId: string | null) => void;
-  onTransform?: (payload: { id: string; position: THREE.Vector3; rotationY: number }) => void;
-  onDeselect?: () => void;
-  onTransformChange?: (payload: { id: string; position: THREE.Vector3; rotationY: number }) => void;
-  undo?: () => void;
-  redo?: () => void;
-};
 
 export type ContextMeshPayload = {
   id: string;
@@ -29,9 +18,8 @@ export type ContextMeshPayload = {
 export type MassingRenderer = {
   setModel: (model?: BlocksModel) => void;
   setAutoSpin: (enabled: boolean) => void;
-  setSelectionHandlers: (handlers?: SelectionHandlers) => void;
   setSelectedBlock: (blockId: string | null) => void;
-  setTransformMode: (mode: 'translate' | 'rotate') => void;
+  setPickHandler: (handler?: (blockId: string | null) => void) => void;
   setContext: (payload: ContextMeshPayload[] | null | undefined) => Promise<void>;
   frameContext: () => boolean;
   dispose: () => void;
@@ -105,23 +93,18 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   const blockMeshes = new Map<string, THREE.Group>();
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
-
-  const transformControls = new TransformControls(camera, renderer.domElement);
-  transformControls.setMode('translate');
-  transformControls.enabled = false;
-  scene.add(transformControls as unknown as THREE.Object3D);
-  styleTransformGizmo(transformControls);
-
-  transformControls.addEventListener('dragging-changed', (event) => {
-    controls.enabled = !event.value;
-  });
+  const selectionHelper = new THREE.BoxHelper(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)), 0xffffff);
+  selectionHelper.visible = false;
+  selectionHelper.material.depthTest = false;
+  selectionHelper.material.transparent = true;
+  selectionHelper.material.opacity = 0.9;
+  scene.add(selectionHelper);
 
   let autoSpin = false;
   let raf: number;
   let resizeObserver: ResizeObserver | undefined;
-  let selectionHandlers: SelectionHandlers | undefined;
-  let selectionEnabled = false;
-  let selectedBlockId: string | null = null;
+  let highlightBlockId: string | null = null;
+  let pickHandler: ((blockId: string | null) => void) | undefined;
   let contextBuildToken = 0;
 
   const handleResize = () => {
@@ -150,52 +133,7 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   };
   animate();
 
-  const selectBlock = (blockId: string | null) => {
-    if (selectedBlockId === blockId) return;
-    selectedBlockId = blockId;
-    if (!selectionEnabled) return;
-
-    if (blockId && blockMeshes.has(blockId)) {
-      const mesh = blockMeshes.get(blockId)!;
-      transformControls.attach(mesh);
-      transformControls.enabled = true;
-    } else {
-      transformControls.detach();
-      transformControls.enabled = false;
-    }
-    selectionHandlers?.onSelect?.(blockId);
-    if (!blockId) {
-      selectionHandlers?.onDeselect?.();
-    }
-  };
-
-  const emitTransform = () => {
-    if (!selectionEnabled || !selectedBlockId) return;
-    const mesh = blockMeshes.get(selectedBlockId);
-    if (!mesh) return;
-    const payload = {
-      id: selectedBlockId,
-      position: mesh.position.clone(),
-      rotationY: mesh.rotation.y
-    };
-    selectionHandlers?.onTransformChange?.(payload);
-  };
-
-  transformControls.addEventListener('change', emitTransform);
-  transformControls.addEventListener('mouseUp', () => {
-    emitTransform();
-    if (!selectionEnabled || !selectedBlockId) return;
-    const mesh = blockMeshes.get(selectedBlockId);
-    if (!mesh) return;
-    selectionHandlers?.onTransform?.({
-      id: selectedBlockId,
-      position: mesh.position.clone(),
-      rotationY: mesh.rotation.y
-    });
-  });
-
   const handlePointerDown = (event: PointerEvent) => {
-    if (!selectionEnabled) return;
     const rect = renderer.domElement.getBoundingClientRect();
     pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -212,11 +150,11 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
     if (intersects.length > 0) {
       const mesh = intersects[0].object as THREE.Mesh & { userData: { blockId?: string } };
       if (mesh.userData.blockId) {
-        selectBlock(mesh.userData.blockId);
+        pickHandler?.(mesh.userData.blockId);
+        return;
       }
-    } else {
-      selectBlock(null);
     }
+    pickHandler?.(null);
   };
 
   renderer.domElement.addEventListener('pointerdown', handlePointerDown);
@@ -235,6 +173,20 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
     bboxHelper.visible = !contextBounds.isEmpty();
   };
 
+  const applySelectionHighlight = () => {
+    if (!highlightBlockId) {
+      selectionHelper.visible = false;
+      return;
+    }
+    const mesh = blockMeshes.get(highlightBlockId);
+    if (!mesh) {
+      selectionHelper.visible = false;
+      return;
+    }
+    selectionHelper.visible = true;
+    selectionHelper.setFromObject(mesh);
+  };
+
   const setModel = (model?: BlocksModel) => {
     logContextChildren('setModel/start');
     if (!model) {
@@ -243,7 +195,8 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
         disposeObject(group);
       });
       blockMeshes.clear();
-      selectBlock(null);
+      highlightBlockId = null;
+      selectionHelper.visible = false;
       return;
     }
 
@@ -268,15 +221,7 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
       blockMeshes.delete(id);
     });
 
-    if (selectedBlockId) {
-      const target = blockMeshes.get(selectedBlockId);
-      if (target) {
-        transformControls.attach(target);
-        transformControls.enabled = true;
-      } else {
-        selectBlock(null);
-      }
-    }
+    applySelectionHighlight();
     logContextChildren('setModel/end');
   };
 
@@ -285,20 +230,12 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
     setAutoSpin: (enabled: boolean) => {
       autoSpin = enabled;
     },
-    setSelectionHandlers: (handlers?: SelectionHandlers) => {
-      selectionHandlers = handlers;
-      selectionEnabled = !!handlers?.enabled;
-      if (!selectionEnabled) {
-        selectBlock(null);
-        transformControls.detach();
-        transformControls.enabled = false;
-      }
-    },
     setSelectedBlock: (blockId: string | null) => {
-      selectBlock(blockId);
+      highlightBlockId = blockId;
+      applySelectionHighlight();
     },
-    setTransformMode: (mode: 'translate' | 'rotate') => {
-      transformControls.setMode(mode);
+    setPickHandler: (handler?: (blockId: string | null) => void) => {
+      pickHandler = handler;
     },
     setContext: (payload: ContextMeshPayload[] | null | undefined) => {
       if (typeof payload === 'undefined') {
@@ -407,7 +344,11 @@ function updateBlockContainer(group: THREE.Group, block: BlocksModel['blocks'][n
     height / 2 + toMeters(block.posY, units),
     toMeters(block.posZ, units)
   );
-  group.rotation.y = THREE.MathUtils.degToRad(block.rotationZ ?? 0);
+  const rotX = THREE.MathUtils.degToRad(block.rotationX ?? 0);
+  const rotY = THREE.MathUtils.degToRad(block.rotationY ?? 0);
+  const rotZ = THREE.MathUtils.degToRad(block.rotationZ ?? 0);
+  group.rotation.order = 'XYZ';
+  group.rotation.set(rotX, rotY, rotZ);
   group.userData.blockId = block.id;
 
   const floors = group.getObjectByName('block-floors') as THREE.Group;
@@ -468,103 +409,6 @@ function disposeObject(object: THREE.Object3D) {
       }
     }
   });
-}
-
-function styleTransformGizmo(transformControls: TransformControls) {
-  const gizmoContainer = (transformControls as unknown as { gizmo?: Record<string, THREE.Object3D> }).gizmo;
-  if (!gizmoContainer?.rotate) return;
-
-  const rotateGroup = gizmoContainer.rotate;
-  const colorMap: Record<string, { color: number; opacity?: number }> = {
-    X: { color: 0xff5757 },
-    Y: { color: 0x4ad18b },
-    Z: { color: 0x5a82ff },
-    E: { color: 0xf4d256, opacity: 0.35 },
-    XYZE: { color: 0xffffff, opacity: 0.3 }
-  };
-
-  const applyMaterialStyle = (object: any, style: { color: number; opacity?: number }) => {
-    const materials = Array.isArray(object.material) ? object.material : [object.material];
-    materials.forEach((material: THREE.Material) => {
-      const mat = material as THREE.Material & { color?: THREE.Color };
-      if (!mat || !mat.color) return;
-      mat.color.setHex(style.color);
-      if (style.opacity !== undefined) {
-        mat.opacity = style.opacity;
-        mat.transparent = true;
-      }
-    });
-  };
-
-  rotateGroup.children.forEach((child: any) => {
-    const style = colorMap[child.name as keyof typeof colorMap];
-    if (style) {
-      applyMaterialStyle(child, style);
-      if (child.name === 'X' || child.name === 'Y' || child.name === 'Z') {
-        addRotationDiamondsToHandle(child, style.color);
-      }
-    }
-  });
-
-  transformControls.setSize(1.2);
-}
-
-function addRotationDiamondsToHandle(handle: THREE.Object3D, color: number) {
-  const parent = handle.parent;
-  if ((handle as any).userData?.hasDiamonds || !parent) return;
-
-  const radius = 0.55;
-  const baseGeometry = new THREE.PlaneGeometry(0.14, 0.14);
-  baseGeometry.rotateZ(Math.PI / 4);
-
-  const material = new THREE.MeshBasicMaterial({
-    color,
-    depthTest: false,
-    depthWrite: false,
-    transparent: true,
-    opacity: 0.95,
-    side: THREE.DoubleSide
-  });
-
-  const angles = [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3];
-  const getPosition = (axis: string, angle: number) => {
-    switch (axis) {
-      case 'X':
-        return new THREE.Vector3(0, Math.cos(angle) * radius, Math.sin(angle) * radius);
-      case 'Y':
-        return new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-      case 'Z':
-      default:
-        return new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
-    }
-  };
-
-  angles.forEach((angle) => {
-    const diamond = new THREE.Mesh(baseGeometry.clone(), material.clone());
-    diamond.name = handle.name;
-    (diamond as any).tag = 'diamond';
-
-    const pos = getPosition(handle.name, angle);
-    const normal = pos.clone().normalize();
-    const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-
-    diamond.position.copy(pos);
-    diamond.quaternion.copy(quaternion);
-    diamond.renderOrder = 1000;
-
-    diamond.updateMatrix();
-    diamond.geometry.applyMatrix4(diamond.matrix);
-    diamond.position.set(0, 0, 0);
-    diamond.rotation.set(0, 0, 0);
-    diamond.scale.set(1, 1, 1);
-    diamond.matrix.identity();
-
-    parent.add(diamond);
-  });
-
-  const userData = (handle as any).userData || {};
-  userData.hasDiamonds = true;
-  (handle as any).userData = userData;
 }
 
 function getFunctionColor(fn: BlockFunction) {
