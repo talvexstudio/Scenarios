@@ -26,12 +26,16 @@ const defaultBlock = (index: number): BlockParams => ({
   posX: index * 25,
   posY: 0,
   posZ: 0,
+  rotationX: 0,
+  rotationY: 0,
   rotationZ: 0,
   defaultFunction: 'Mixed'
 });
 
 const ensureRotation = (block: BlockParams): BlockParams => ({
   ...block,
+  rotationX: block.rotationX ?? 0,
+  rotationY: block.rotationY ?? 0,
   rotationZ: block.rotationZ ?? 0
 });
 

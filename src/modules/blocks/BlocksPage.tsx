@@ -535,6 +535,7 @@ function BlockCard({
           />
 
           <PositionRow block={block} onChange={onChange} />
+          <AnglesRow block={block} />
 
           <div className="flex flex-col gap-1">
             <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Program</label>
@@ -648,18 +649,24 @@ type PositionRowProps = {
   onChange: (id: string, field: keyof BlockParams, value: string) => void;
 };
 
+const POSITION_FIELDS: Array<{ label: string; field: keyof BlockParams }> = [
+  { label: 'X', field: 'posX' },
+  { label: 'Y', field: 'posZ' },
+  { label: 'Z', field: 'posY' }
+];
+
 function PositionRow({ block, onChange }: PositionRowProps) {
   return (
     <div className="flex flex-col gap-2">
       <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Position (x, y, z)</label>
       <div className="grid grid-cols-3 gap-3">
-        {(['posX', 'posY', 'posZ'] as Array<keyof BlockParams>).map((axis) => (
-          <div key={axis} className="flex flex-col gap-1">
-            <span className="text-[11px] uppercase tracking-[0.2em] text-[#b3bcd3]">{axis.toUpperCase()}</span>
+        {POSITION_FIELDS.map(({ label, field }) => (
+          <div key={field} className="flex flex-col gap-1">
+            <span className="text-[11px] uppercase tracking-[0.2em] text-[#b3bcd3]">{label}</span>
             <input
               type="number"
-              value={block[axis] as number}
-              onChange={(event) => onChange(block.id, axis, event.target.value)}
+              value={block[field] as number}
+              onChange={(event) => onChange(block.id, field, event.target.value)}
               className="rounded-[14px] border border-[#d7deef] px-2 py-1 text-sm bg-white"
             />
           </div>
@@ -667,6 +674,73 @@ function PositionRow({ block, onChange }: PositionRowProps) {
       </div>
     </div>
   );
+}
+
+function AnglesRow({ block }: { block: BlockParams }) {
+  const angles = {
+    rotationX: block.rotationX ?? 0,
+    rotationY: block.rotationY ?? 0,
+    rotationZ: block.rotationZ ?? 0
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Angles</label>
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: 'X', field: 'rotationX' },
+          { label: 'Y', field: 'rotationZ' },
+          { label: 'Z', field: 'rotationY' }
+        ].map(({ label, field }) => (
+          <AngleControl key={label} axis={label} field={field} value={angles[field]} blockId={block.id} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AngleControl({
+  axis,
+  field,
+  value,
+  blockId
+}: {
+  axis: 'X' | 'Y' | 'Z';
+  field: 'rotationX' | 'rotationY' | 'rotationZ';
+  value: number;
+  blockId: string;
+}) {
+  const updateBlock = useBlocksStore((state) => state.updateBlock);
+  const normalized = clampAngle(value);
+
+  const handleChange = (next: number) => {
+    const clamped = clampAngle(next);
+    updateBlock(blockId, { [field]: clamped } as Partial<BlockParams>);
+  };
+
+  const displayValue = Number((Math.abs(normalized - Math.round(normalized)) < 1e-3 ? Math.round(normalized) : normalized).toFixed(1));
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[11px] uppercase tracking-[0.2em] text-[#b3bcd3]">{axis}</span>
+      <div className="rounded-[14px] border border-[#d7deef] bg-white p-1">
+        <input
+          type="number"
+          step={0.1}
+          value={displayValue}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => handleChange(Number(event.target.value))}
+          className="w-full rounded-[10px] border border-[#e2e7f0] px-2 py-1 text-center text-sm"
+        />
+      </div>
+    </div>
+  );
+}
+
+function clampAngle(value: number) {
+  let result = value;
+  while (result > 180) result -= 360;
+  while (result < -180) result += 360;
+  return Number(result.toFixed(1));
 }
 
 type MetricsPanelProps = {

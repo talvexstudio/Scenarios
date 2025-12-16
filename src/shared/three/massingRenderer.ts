@@ -344,7 +344,11 @@ function updateBlockContainer(group: THREE.Group, block: BlocksModel['blocks'][n
     height / 2 + toMeters(block.posY, units),
     toMeters(block.posZ, units)
   );
-  group.rotation.y = THREE.MathUtils.degToRad(block.rotationZ ?? 0);
+  const rotX = THREE.MathUtils.degToRad(block.rotationX ?? 0);
+  const rotY = THREE.MathUtils.degToRad(block.rotationY ?? 0);
+  const rotZ = THREE.MathUtils.degToRad(block.rotationZ ?? 0);
+  group.rotation.order = 'XYZ';
+  group.rotation.set(rotX, rotY, rotZ);
   group.userData.blockId = block.id;
 
   const floors = group.getObjectByName('block-floors') as THREE.Group;

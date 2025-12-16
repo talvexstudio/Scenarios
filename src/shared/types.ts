@@ -12,6 +12,8 @@ export interface BlockParams {
   posX: number;
   posY: number;
   posZ: number;
+  rotationX?: number;
+  rotationY?: number;
   rotationZ?: number;
   defaultFunction: BlockFunction;
 }
