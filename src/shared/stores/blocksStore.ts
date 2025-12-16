@@ -6,14 +6,15 @@ import { deepClone } from '../utils/clone';
 type BlocksState = {
   units: Units;
   blocks: BlockParams[];
-  selectedBlockId: string | null;
+  selectedBlockIds: string[];
   addBlock: () => void;
   updateBlock: (id: string, changes: Partial<BlockParams>) => void;
   removeBlock: (id: string) => void;
   resetBlocks: (model?: BlocksModel) => void;
   setUnits: (units: Units) => void;
   getModelSnapshot: () => BlocksModel;
-  selectBlock: (id: string | null) => void;
+  selectBlock: (id: string | null, additive?: boolean) => void;
+  clearSelection: () => void;
 };
 
 const defaultBlock = (index: number): BlockParams => ({
@@ -39,45 +40,64 @@ const ensureRotation = (block: BlockParams): BlockParams => ({
   rotationZ: block.rotationZ ?? 0
 });
 
-export const useBlocksStore = create<BlocksState>((set, get) => ({
-  units: 'metric',
-  blocks: [defaultBlock(0)],
-  selectedBlockId: null,
-  addBlock: () =>
-    set((state) => ({
-      blocks: [...state.blocks, defaultBlock(state.blocks.length)]
-    })),
-  updateBlock: (id, changes) =>
-    set((state) => ({
-      blocks: state.blocks.map((block) => (block.id === id ? { ...block, ...changes } : block))
-    })),
-  removeBlock: (id) =>
-    set((state) => ({
-      blocks: state.blocks.filter((block) => block.id !== id),
-      selectedBlockId: state.selectedBlockId === id ? null : state.selectedBlockId
-    })),
-  setUnits: (units) => set(() => ({ units })),
-  resetBlocks: (model) =>
-    set(() => {
-      if (model) {
-        const nextBlocks = deepClone(model.blocks).map(ensureRotation);
-        return {
-          units: model.units,
-          blocks: nextBlocks,
-          selectedBlockId: nextBlocks[0]?.id ?? null
-        };
-      }
-      const initial = defaultBlock(0);
-      return { units: 'metric' as Units, blocks: [initial], selectedBlockId: initial.id };
-    }),
-  getModelSnapshot: () => {
-    const state = get();
-    return {
-      schemaVersion: 1,
-      units: state.units,
-      blocks: deepClone(state.blocks).map(ensureRotation),
-      createdAt: new Date().toISOString()
-    };
-  },
-  selectBlock: (id) => set({ selectedBlockId: id })
-}));
+const removeFromSelection = (selection: string[], id: string) => selection.filter((selectedId) => selectedId !== id);
+
+export const useBlocksStore = create<BlocksState>((set, get) => {
+  const initialBlock = defaultBlock(0);
+  return {
+    units: 'metric',
+    blocks: [initialBlock],
+    selectedBlockIds: [initialBlock.id],
+    addBlock: () =>
+      set((state) => ({
+        blocks: [...state.blocks, defaultBlock(state.blocks.length)]
+      })),
+    updateBlock: (id, changes) =>
+      set((state) => ({
+        blocks: state.blocks.map((block) => (block.id === id ? { ...block, ...changes } : block))
+      })),
+    removeBlock: (id) =>
+      set((state) => ({
+        blocks: state.blocks.filter((block) => block.id !== id),
+        selectedBlockIds: removeFromSelection(state.selectedBlockIds, id)
+      })),
+    setUnits: (units) => set(() => ({ units })),
+    resetBlocks: (model) =>
+      set(() => {
+        if (model) {
+          const nextBlocks = deepClone(model.blocks).map(ensureRotation);
+          return {
+            units: model.units,
+            blocks: nextBlocks,
+            selectedBlockIds: nextBlocks[0]?.id ? [nextBlocks[0].id] : []
+          };
+        }
+        const fresh = defaultBlock(0);
+        return { units: 'metric' as Units, blocks: [fresh], selectedBlockIds: [fresh.id] };
+      }),
+    getModelSnapshot: () => {
+      const state = get();
+      return {
+        schemaVersion: 1,
+        units: state.units,
+        blocks: deepClone(state.blocks).map(ensureRotation),
+        createdAt: new Date().toISOString()
+      };
+    },
+    selectBlock: (id, additive = false) =>
+      set((state) => {
+        if (!id) {
+          return { selectedBlockIds: [] };
+        }
+        if (!additive) {
+          return { selectedBlockIds: [id] };
+        }
+        const alreadySelected = state.selectedBlockIds.includes(id);
+        if (alreadySelected) {
+          return { selectedBlockIds: removeFromSelection(state.selectedBlockIds, id) };
+        }
+        return { selectedBlockIds: [...state.selectedBlockIds, id] };
+      }),
+    clearSelection: () => set({ selectedBlockIds: [] })
+  };
+});

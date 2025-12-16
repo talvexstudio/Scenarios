@@ -8,8 +8,8 @@ type RendererHostProps = {
   autoSpin?: boolean;
   onReady?: (renderer: MassingRenderer | null) => void;
   className?: string;
-  selectedBlockId?: string | null;
-  onPickBlock?: (id: string | null) => void;
+  selectedBlockIds?: string[];
+  onPickBlock?: (id: string | null, info?: { additive?: boolean }) => void;
 };
 
 export function RendererHost({
@@ -18,7 +18,7 @@ export function RendererHost({
   autoSpin = false,
   onReady,
   className,
-  selectedBlockId = null,
+  selectedBlockIds = [],
   onPickBlock
 }: RendererHostProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -68,8 +68,8 @@ export function RendererHost({
   }, [autoSpin]);
 
   useEffect(() => {
-    rendererRef.current?.setSelectedBlock(selectedBlockId ?? null);
-  }, [selectedBlockId]);
+    rendererRef.current?.setSelectedBlocks(selectedBlockIds ?? []);
+  }, [selectedBlockIds]);
 
   useEffect(() => {
     rendererRef.current?.setPickHandler(onPickBlock);

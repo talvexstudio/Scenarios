@@ -1,14 +1,21 @@
 import {
+  AlignCenterVertical as LucideAlignCenterVertical,
+  ArrowDownToLine as LucideArrowDownToLine,
+  ArrowLeftRight as LucideArrowLeftRight,
   ArrowRight as LucideArrowRight,
+  ArrowUpDown as LucideArrowUpDown,
   ChevronDown as LucideChevronDown,
   ChevronUp as LucideChevronUp,
   Copy as LucideCopy,
+  Crosshair as LucideCrosshair,
   Download as LucideDownload,
   Info as LucideInfo,
+  Layers as LucideLayers,
   MapPin as LucideMapPin,
   MoreHorizontal as LucideMoreHorizontal,
   Plus as LucidePlus,
   RefreshCw as LucideRefreshCw,
+  RotateCcw as LucideRotateCcw,
   RotateCw as LucideRotateCw,
   Search as LucideSearch,
   Trash2 as LucideTrash2,
@@ -38,3 +45,10 @@ export const Copy = withDefaults(LucideCopy);
 export const Download = withDefaults(LucideDownload);
 export const RefreshCw = withDefaults(LucideRefreshCw);
 export const ArrowRight = withDefaults(LucideArrowRight);
+export const RotateCcw = withDefaults(LucideRotateCcw);
+export const Crosshair = withDefaults(LucideCrosshair);
+export const ArrowDownToLine = withDefaults(LucideArrowDownToLine);
+export const ArrowLeftRight = withDefaults(LucideArrowLeftRight);
+export const ArrowUpDown = withDefaults(LucideArrowUpDown);
+export const AlignVerticalCenter = withDefaults(LucideAlignCenterVertical);
+export const Layers = withDefaults(LucideLayers);

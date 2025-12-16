@@ -15,11 +15,13 @@ export type ContextMeshPayload = {
   footprint: Array<[number, number]>;
 };
 
+type PickHandler = (blockId: string | null, info?: { additive?: boolean }) => void;
+
 export type MassingRenderer = {
   setModel: (model?: BlocksModel) => void;
   setAutoSpin: (enabled: boolean) => void;
-  setSelectedBlock: (blockId: string | null) => void;
-  setPickHandler: (handler?: (blockId: string | null) => void) => void;
+  setSelectedBlocks: (blockIds: string[]) => void;
+  setPickHandler: (handler?: PickHandler) => void;
   setContext: (payload: ContextMeshPayload[] | null | undefined) => Promise<void>;
   frameContext: () => boolean;
   dispose: () => void;
@@ -93,18 +95,13 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   const blockMeshes = new Map<string, THREE.Group>();
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
-  const selectionHelper = new THREE.BoxHelper(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)), 0xffffff);
-  selectionHelper.visible = false;
-  selectionHelper.material.depthTest = false;
-  selectionHelper.material.transparent = true;
-  selectionHelper.material.opacity = 0.9;
-  scene.add(selectionHelper);
+  const selectionHelpers = new Map<string, THREE.BoxHelper>();
+  let highlightedIds: string[] = [];
 
   let autoSpin = false;
   let raf: number;
   let resizeObserver: ResizeObserver | undefined;
-  let highlightBlockId: string | null = null;
-  let pickHandler: ((blockId: string | null) => void) | undefined;
+  let pickHandler: PickHandler | undefined;
   let contextBuildToken = 0;
 
   const handleResize = () => {
@@ -147,14 +144,15 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
       });
     });
     const intersects = raycaster.intersectObjects(meshes, false);
+    const additive = !!(event.ctrlKey || event.metaKey);
     if (intersects.length > 0) {
       const mesh = intersects[0].object as THREE.Mesh & { userData: { blockId?: string } };
       if (mesh.userData.blockId) {
-        pickHandler?.(mesh.userData.blockId);
+        pickHandler?.(mesh.userData.blockId, { additive });
         return;
       }
     }
-    pickHandler?.(null);
+    pickHandler?.(null, { additive });
   };
 
   renderer.domElement.addEventListener('pointerdown', handlePointerDown);
@@ -173,30 +171,55 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
     bboxHelper.visible = !contextBounds.isEmpty();
   };
 
+  const disposeSelectionHelper = (helper: THREE.BoxHelper) => {
+    scene.remove(helper);
+    helper.geometry.dispose();
+    (helper.material as THREE.Material).dispose?.();
+  };
+
   const applySelectionHighlight = () => {
-    if (!highlightBlockId) {
-      selectionHelper.visible = false;
-      return;
-    }
-    const mesh = blockMeshes.get(highlightBlockId);
-    if (!mesh) {
-      selectionHelper.visible = false;
-      return;
-    }
-    selectionHelper.visible = true;
-    selectionHelper.setFromObject(mesh);
+    const active = new Set(highlightedIds);
+    selectionHelpers.forEach((helper, id) => {
+      if (!active.has(id) || !blockMeshes.get(id)) {
+        disposeSelectionHelper(helper);
+        selectionHelpers.delete(id);
+      }
+    });
+
+    highlightedIds.forEach((id) => {
+      const mesh = blockMeshes.get(id);
+      if (!mesh) return;
+      let helper = selectionHelpers.get(id);
+      if (!helper) {
+        helper = new THREE.BoxHelper(mesh, 0xffffff);
+        const material = helper.material as THREE.LineBasicMaterial;
+        material.depthTest = false;
+        material.transparent = true;
+        material.opacity = 0.9;
+        material.color.set(0xffffff);
+        selectionHelpers.set(id, helper);
+        scene.add(helper);
+      } else {
+        helper.setFromObject(mesh);
+        helper.visible = true;
+      }
+    });
   };
 
   const setModel = (model?: BlocksModel) => {
     logContextChildren('setModel/start');
     if (!model) {
-      blockMeshes.forEach((group) => {
+      blockMeshes.forEach((group, id) => {
         massingGroup.remove(group);
         disposeObject(group);
+        const helper = selectionHelpers.get(id);
+        if (helper) {
+          disposeSelectionHelper(helper);
+          selectionHelpers.delete(id);
+        }
       });
       blockMeshes.clear();
-      highlightBlockId = null;
-      selectionHelper.visible = false;
+      highlightedIds = [];
       return;
     }
 
@@ -219,6 +242,11 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
       massingGroup.remove(container);
       disposeObject(container);
       blockMeshes.delete(id);
+      const helper = selectionHelpers.get(id);
+      if (helper) {
+        disposeSelectionHelper(helper);
+        selectionHelpers.delete(id);
+      }
     });
 
     applySelectionHighlight();
@@ -230,11 +258,11 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
     setAutoSpin: (enabled: boolean) => {
       autoSpin = enabled;
     },
-    setSelectedBlock: (blockId: string | null) => {
-      highlightBlockId = blockId;
+    setSelectedBlocks: (blockIds: string[]) => {
+      highlightedIds = blockIds.slice();
       applySelectionHighlight();
     },
-    setPickHandler: (handler?: (blockId: string | null) => void) => {
+    setPickHandler: (handler?: PickHandler) => {
       pickHandler = handler;
     },
     setContext: (payload: ContextMeshPayload[] | null | undefined) => {
@@ -300,6 +328,9 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
       controls.dispose();
       renderer.dispose();
       contextGroup.clear();
+      selectionHelpers.forEach((helper) => disposeSelectionHelper(helper));
+      selectionHelpers.clear();
+      highlightedIds = [];
       container.innerHTML = '';
     },
     instanceId

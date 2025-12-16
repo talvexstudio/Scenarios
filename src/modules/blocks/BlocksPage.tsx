@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { nanoid } from 'nanoid';
 import { BlockFunction, BlockParams, BlocksModel, Metrics, ScenarioOption } from '../../shared/types';
@@ -12,20 +12,36 @@ import { formatArea, toMeters } from '../../shared/utils/units';
 import { prepareContextPayload } from '../../shared/context/prepareContextPayload';
 import { createTBKArchive, parseTBKFile } from '../../shared/utils/tbk';
 import {
+  AlignVerticalCenter,
+  ArrowDownToLine,
+  ArrowLeftRight,
   ArrowRight,
+  ArrowUpDown,
   ChevronDown,
   ChevronUp,
   Copy as CopyIcon,
+  Crosshair,
   Download,
+  Layers,
   Plus,
   RefreshCw,
+  RotateCcw,
   Trash2
 } from '../../shared/ui/icons';
+
+type PowerToolAction =
+  | 'reset-position'
+  | 'center-origin'
+  | 'set-z-zero'
+  | 'align-x'
+  | 'align-y'
+  | 'align-z'
+  | 'stack';
 
 export function BlocksPage() {
   const { blocks, units, addBlock, updateBlock, removeBlock, getModelSnapshot, resetBlocks, setUnits } =
     useBlocksStore();
-  const selectedBlockId = useBlocksStore((state) => state.selectedBlockId);
+  const selectedBlockIds = useBlocksStore((state) => state.selectedBlockIds);
   const selectBlock = useBlocksStore((state) => state.selectBlock);
   const scenarios = useScenariosStore((state) => state.options);
   const addScenario = useScenariosStore((state) => state.addOption);
@@ -58,6 +74,13 @@ export function BlocksPage() {
     [blocks, units]
   );
 
+  const selectionCount = selectedBlockIds.length;
+  const referenceBlockId = selectedBlockIds[0] ?? null;
+  const referenceBlock = useMemo(
+    () => (referenceBlockId ? blocks.find((block) => block.id === referenceBlockId) ?? null : null),
+    [blocks, referenceBlockId]
+  );
+
   const blocksContextPayload = useMemo(() => {
     if (!contextCenter || contextBuildings.length === 0) {
       return null;
@@ -70,6 +93,28 @@ export function BlocksPage() {
     );
     return payload;
   }, [contextCenter, contextBuildings, contextLastKey, contextRadius]);
+
+  const handleRendererPick = useCallback(
+    (blockId: string | null, info?: { additive?: boolean }) => {
+      if (blockId) {
+        selectBlock(blockId, info?.additive ?? false);
+      } else {
+        selectBlock(null);
+      }
+    },
+    [selectBlock]
+  );
+
+  const handlePowerTool = useCallback(
+    (action: PowerToolAction) => {
+      console.log('[Blocks][PowerTool]', {
+        action,
+        selectedBlockIds,
+        referenceId: referenceBlockId
+      });
+    },
+    [selectedBlockIds, referenceBlockId]
+  );
 
   useEffect(() => {
     setExpandedCards((prev) => {
@@ -86,18 +131,16 @@ export function BlocksPage() {
   useEffect(() => {
     if (!blocks.length) {
       selectBlock(null);
-      return;
     }
-    if (selectedBlockId && !blocks.some((block) => block.id === selectedBlockId)) {
-      selectBlock(blocks[0].id);
-    }
-  }, [blocks, selectedBlockId, selectBlock]);
+  }, [blocks.length, selectBlock]);
+
+  const lastSelectedId = selectedBlockIds[selectedBlockIds.length - 1];
 
   useEffect(() => {
-    if (selectedBlockId) {
-      blockRefs.current[selectedBlockId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (lastSelectedId) {
+      blockRefs.current[lastSelectedId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  }, [selectedBlockId]);
+  }, [lastSelectedId]);
 
   const workshopMetrics = useMemo(() => computeMetricsFromBlocksModel(liveModel), [liveModel]);
 
@@ -211,14 +254,19 @@ export function BlocksPage() {
           <RendererHost
             model={liveModel}
             context={blocksContextPayload}
-            selectedBlockId={selectedBlockId}
-            onPickBlock={selectBlock}
+            selectedBlockIds={selectedBlockIds}
+            onPickBlock={handleRendererPick}
             className="h-full w-full min-h-[420px] rounded-[24px] bg-[#f4f6fb]"
           />
           <MetricsPanel
             open={metricsOpen}
             onToggle={() => setMetricsOpen((prev) => !prev)}
             metrics={workshopMetrics}
+          />
+          <PowerToolsHud
+            selectionCount={selectionCount}
+            referenceName={referenceBlock?.name ?? null}
+            onAction={handlePowerTool}
           />
         </section>
 
@@ -241,26 +289,31 @@ export function BlocksPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 pb-8 space-y-4">
-            {blocks.map((block, index) => (
-              <BlockCard
-                key={block.id}
-                block={block}
-                units={units}
-                expanded={!!expandedCards[block.id]}
-                onToggle={() => toggleCard(block.id)}
-                onChange={handleFieldChange}
-                onDuplicate={() => duplicateBlock(block)}
-                onRemove={() => removeBlock(block.id)}
-                disableRemove={blocks.length === 1}
-                showUnitsSelector={index === 0}
-                setUnits={setUnits}
-                selected={block.id === selectedBlockId}
-                onSelect={() => selectBlock(block.id)}
-                registerRef={(node) => {
-                  blockRefs.current[block.id] = node;
-                }}
-              />
-            ))}
+            {blocks.map((block, index) => {
+              const isSelected = selectedBlockIds.includes(block.id);
+              const isReference = referenceBlockId === block.id;
+              return (
+                <BlockCard
+                  key={block.id}
+                  block={block}
+                  units={units}
+                  expanded={!!expandedCards[block.id]}
+                  onToggle={() => toggleCard(block.id)}
+                  onChange={handleFieldChange}
+                  onDuplicate={() => duplicateBlock(block)}
+                  onRemove={() => removeBlock(block.id)}
+                  disableRemove={blocks.length === 1}
+                  showUnitsSelector={index === 0}
+                  setUnits={setUnits}
+                  selected={isSelected}
+                  isReference={isReference}
+                  onSelect={(additive) => selectBlock(block.id, additive)}
+                  registerRef={(node) => {
+                    blockRefs.current[block.id] = node;
+                  }}
+                />
+              );
+            })}
           </div>
 
           <div className="sticky bottom-0 border-t border-slate-200 bg-[#f9fafc] px-6 py-4 flex flex-col gap-3">
@@ -412,7 +465,8 @@ type BlockCardProps = {
   showUnitsSelector: boolean;
   setUnits: (units: BlocksModel['units']) => void;
   selected: boolean;
-  onSelect: () => void;
+  isReference: boolean;
+  onSelect: (additive: boolean) => void;
   registerRef?: (node: HTMLDivElement | null) => void;
 };
 
@@ -428,6 +482,7 @@ function BlockCard({
   showUnitsSelector,
   setUnits,
   selected,
+  isReference,
   onSelect,
   registerRef
 }: BlockCardProps) {
@@ -436,7 +491,7 @@ function BlockCard({
   const programColor = FUNCTION_COLORS[block.defaultFunction].color;
   const badge = PROGRAM_BADGES[block.defaultFunction];
   const cardClasses = [
-    'rounded-[28px] border border-[#e0e6f4] bg-white shadow-[0_12px_30px_rgba(32,40,62,0.08)] transition focus-within:ring-2 focus-within:ring-[#4f6cd2]/40',
+    'relative rounded-[28px] border border-[#e0e6f4] bg-white shadow-[0_12px_30px_rgba(32,40,62,0.08)] transition focus-within:ring-2 focus-within:ring-[#4f6cd2]/40',
     selected ? 'border-[#4f6cd2] bg-[#edf1ff] ring-2 ring-offset-2 ring-offset-[#f6f8ff] ring-[#4f6cd2]/60' : ''
   ].join(' ');
   const contentId = `block-card-${block.id}`;
@@ -445,11 +500,24 @@ function BlockCard({
     <div
       ref={(node) => registerRef?.(node)}
       className={cardClasses}
-      onMouseDown={onSelect}
-      onFocusCapture={onSelect}
+      onMouseDown={(event) => onSelect(event.ctrlKey || event.metaKey)}
+      onFocusCapture={() => onSelect(false)}
     >
+      {isReference && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute left-0 top-3 bottom-3 w-1.5 rounded-full bg-[#4f6cd2]"
+        />
+      )}
       <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <button type="button" onClick={onSelect} className="flex flex-1 items-center gap-3 text-left">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect(event.ctrlKey || event.metaKey);
+          }}
+          className="flex flex-1 items-center gap-3 text-left"
+        >
           <span className={`flex h-10 w-10 items-center justify-center rounded-full ${badge.bg}`}>
             <span className="text-lg" role="img" aria-hidden="true">
               {badge.icon}
@@ -468,7 +536,7 @@ function BlockCard({
           aria-controls={contentId}
           onClick={(event) => {
             event.stopPropagation();
-            onSelect();
+            onSelect(event.ctrlKey || event.metaKey);
             onToggle();
           }}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#98a7c4] hover:bg-[#eef2ff]"
@@ -644,6 +712,77 @@ function LevelsHeightRow({ levels, levelHeight, units, onLevelsChange, onHeightC
   );
 }
 
+type PowerToolsHudProps = {
+  selectionCount: number;
+  referenceName: string | null;
+  onAction: (action: PowerToolAction) => void;
+};
+
+const POWER_TOOL_BUTTONS: Array<{
+  id: PowerToolAction;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  minSelected: number;
+}> = [
+  { id: 'reset-position', label: 'Reset Position', icon: RotateCcw, minSelected: 1 },
+  { id: 'center-origin', label: 'Center to Origin', icon: Crosshair, minSelected: 1 },
+  { id: 'set-z-zero', label: 'Set Z = 0', icon: ArrowDownToLine, minSelected: 1 },
+  { id: 'align-x', label: 'Align X', icon: ArrowLeftRight, minSelected: 2 },
+  { id: 'align-y', label: 'Align Y', icon: ArrowUpDown, minSelected: 2 },
+  { id: 'align-z', label: 'Align Z', icon: AlignVerticalCenter, minSelected: 2 },
+  { id: 'stack', label: 'Stack on Ref', icon: Layers, minSelected: 2 }
+];
+
+function PowerToolsHud({ selectionCount, referenceName, onAction }: PowerToolsHudProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <div className="pointer-events-none absolute bottom-4 left-4 z-30">
+      <div className="pointer-events-auto rounded-[20px] border border-white/50 bg-white/90 px-4 py-2 shadow-[0_18px_45px_rgba(15,23,42,0.15)] backdrop-blur-md">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-[#6d768f]">Power Tools</p>
+          <button
+            type="button"
+            onClick={() => setCollapsed((prev) => !prev)}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 text-[#4b5672] shadow hover:bg-white"
+          >
+            {collapsed ? <ChevronUp /> : <ChevronDown />}
+          </button>
+        </div>
+        {!collapsed && (
+          <>
+            <div className="mt-2 flex items-center justify-between gap-1.5 w-[420px]">
+              {POWER_TOOL_BUTTONS.map((btn) => {
+                const enabled = selectionCount >= btn.minSelected;
+                const Icon = btn.icon;
+                return (
+                  <button
+                    type="button"
+                    key={btn.id}
+                    disabled={!enabled}
+                    onClick={() => enabled && onAction(btn.id)}
+                    className="group relative flex h-9 w-9 items-center justify-center rounded-lg text-[#1f2740] transition hover:bg-[#ecf0fb] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className="pointer-events-none absolute bottom-full left-1/2 mb-1 -translate-x-1/2 rounded-md bg-[#1f2740] px-2 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                      {btn.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {selectionCount >= 2 && (
+              <p className="mt-1 text-[11px] text-[#5d6785]">
+                Reference: <span className="font-semibold text-[#1f2740]">{referenceName ?? '—'}</span>
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 type PositionRowProps = {
   block: BlockParams;
   onChange: (id: string, field: keyof BlockParams, value: string) => void;
@@ -686,11 +825,13 @@ function AnglesRow({ block }: { block: BlockParams }) {
     <div className="flex flex-col gap-2">
       <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Angles</label>
       <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'X', field: 'rotationX' },
-          { label: 'Y', field: 'rotationZ' },
-          { label: 'Z', field: 'rotationY' }
-        ].map(({ label, field }) => (
+        {(
+          [
+            { label: 'X', field: 'rotationX' },
+            { label: 'Y', field: 'rotationZ' },
+            { label: 'Z', field: 'rotationY' }
+          ] as const
+        ).map(({ label, field }) => (
           <AngleControl key={label} axis={label} field={field} value={angles[field]} blockId={block.id} />
         ))}
       </div>
