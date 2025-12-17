@@ -24,9 +24,11 @@ import {
   Download,
   Layers,
   Plus,
+  Redo2,
   RefreshCw,
   RotateCcw,
-  Trash2
+  Trash2,
+  Undo2
 } from '../../shared/ui/icons';
 
 type PowerToolAction =
@@ -43,6 +45,10 @@ export function BlocksPage() {
     useBlocksStore();
   const selectedBlockIds = useBlocksStore((state) => state.selectedBlockIds);
   const selectBlock = useBlocksStore((state) => state.selectBlock);
+  const undo = useBlocksStore((state) => state.undo);
+  const redo = useBlocksStore((state) => state.redo);
+  const canUndo = useBlocksStore((state) => state.history.past.length > 0);
+  const canRedo = useBlocksStore((state) => state.history.future.length > 0);
   const scenarios = useScenariosStore((state) => state.options);
   const addScenario = useScenariosStore((state) => state.addOption);
   const replaceScenario = useScenariosStore((state) => state.replaceOption);
@@ -104,6 +110,28 @@ export function BlocksPage() {
     },
     [selectBlock]
   );
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const isModifier = event.ctrlKey || event.metaKey;
+      if (!isModifier) return;
+      if (isEditableElement(event.target as HTMLElement | null)) return;
+      const key = event.key.toLowerCase();
+      if (key === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+      } else if (key === 'y') {
+        event.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [undo, redo]);
 
   const handlePowerTool = useCallback(
     (action: PowerToolAction) => {
@@ -267,6 +295,10 @@ export function BlocksPage() {
             selectionCount={selectionCount}
             referenceName={referenceBlock?.name ?? null}
             onAction={handlePowerTool}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={undo}
+            onRedo={redo}
           />
         </section>
 
@@ -716,6 +748,10 @@ type PowerToolsHudProps = {
   selectionCount: number;
   referenceName: string | null;
   onAction: (action: PowerToolAction) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 };
 
 const POWER_TOOL_BUTTONS: Array<{
@@ -733,7 +769,38 @@ const POWER_TOOL_BUTTONS: Array<{
   { id: 'stack', label: 'Stack on Ref', icon: Layers, minSelected: 2 }
 ];
 
-function PowerToolsHud({ selectionCount, referenceName, onAction }: PowerToolsHudProps) {
+type ToolButtonProps = {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+};
+
+function ToolButton({ icon: Icon, label, disabled, onClick }: ToolButtonProps) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => !disabled && onClick()}
+      className="group relative flex h-9 w-9 items-center justify-center rounded-lg text-[#1f2740] transition hover:bg-[#ecf0fb] disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <Icon className="h-4 w-4" />
+      <span className="pointer-events-none absolute bottom-full left-1/2 mb-1 -translate-x-1/2 rounded-md bg-[#1f2740] px-2 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+        {label}
+      </span>
+    </button>
+  );
+}
+
+function PowerToolsHud({
+  selectionCount,
+  referenceName,
+  onAction,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo
+}: PowerToolsHudProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -751,23 +818,22 @@ function PowerToolsHud({ selectionCount, referenceName, onAction }: PowerToolsHu
         </div>
         {!collapsed && (
           <>
-            <div className="mt-2 flex items-center justify-between gap-1.5 w-[420px]">
+            <p className="mt-1 text-[10px] uppercase tracking-wide text-[#9aa2b7]">
+              {selectionCount === 0 ? 'No selection' : `${selectionCount} selected`}
+            </p>
+            <div className="mt-2 flex items-center gap-1.5 w-[460px]">
+              <ToolButton icon={Undo2} label="Undo" disabled={!canUndo} onClick={onUndo} />
+              <ToolButton icon={Redo2} label="Redo" disabled={!canRedo} onClick={onRedo} />
               {POWER_TOOL_BUTTONS.map((btn) => {
                 const enabled = selectionCount >= btn.minSelected;
-                const Icon = btn.icon;
                 return (
-                  <button
-                    type="button"
+                  <ToolButton
                     key={btn.id}
+                    icon={btn.icon}
+                    label={btn.label}
                     disabled={!enabled}
-                    onClick={() => enabled && onAction(btn.id)}
-                    className="group relative flex h-9 w-9 items-center justify-center rounded-lg text-[#1f2740] transition hover:bg-[#ecf0fb] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <Icon className="h-4 w-4" />
-                    <span className="pointer-events-none absolute bottom-full left-1/2 mb-1 -translate-x-1/2 rounded-md bg-[#1f2740] px-2 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-                      {btn.label}
-                    </span>
-                  </button>
+                    onClick={() => onAction(btn.id)}
+                  />
                 );
               })}
             </div>
@@ -938,4 +1004,11 @@ function MetricsPanel({ open, onToggle, metrics }: MetricsPanelProps) {
       )}
     </div>
   );
+}
+
+function isEditableElement(element: HTMLElement | null) {
+  if (!element) return false;
+  if (element.isContentEditable) return true;
+  const tagName = element.tagName.toLowerCase();
+  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || element.getAttribute('role') === 'textbox';
 }

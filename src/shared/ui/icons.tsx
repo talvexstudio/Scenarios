@@ -15,10 +15,12 @@ import {
   MoreHorizontal as LucideMoreHorizontal,
   Plus as LucidePlus,
   RefreshCw as LucideRefreshCw,
+  Redo2 as LucideRedo2,
   RotateCcw as LucideRotateCcw,
   RotateCw as LucideRotateCw,
   Search as LucideSearch,
   Trash2 as LucideTrash2,
+  Undo2 as LucideUndo2,
   X as LucideX
 } from 'lucide-react';
 import type { LucideIcon, LucideProps } from 'lucide-react';
@@ -52,3 +54,5 @@ export const ArrowLeftRight = withDefaults(LucideArrowLeftRight);
 export const ArrowUpDown = withDefaults(LucideArrowUpDown);
 export const AlignVerticalCenter = withDefaults(LucideAlignCenterVertical);
 export const Layers = withDefaults(LucideLayers);
+export const Undo2 = withDefaults(LucideUndo2);
+export const Redo2 = withDefaults(LucideRedo2);
