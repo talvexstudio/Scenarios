@@ -10,7 +10,7 @@ import { deepClone } from '../../shared/utils/clone';
 import { RendererHost } from '../../shared/three/RendererHost';
 import { formatArea, toMeters, fromMeters } from '../../shared/utils/units';
 import { TransformMode } from '../../shared/three/massingRenderer';
-import { MathUtils } from 'three';
+import { MathUtils, Quaternion, Euler } from 'three';
 import { prepareContextPayload } from '../../shared/context/prepareContextPayload';
 import { createTBKArchive, parseTBKFile } from '../../shared/utils/tbk';
 import {
@@ -107,17 +107,22 @@ export function BlocksPage() {
   }, [contextCenter, contextBuildings, contextLastKey, contextRadius]);
 
   const handleTransformCommit = useCallback(
-    (payload: { blockId: string; position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }) => {
+    (payloads: { id: string; position: { x: number; y: number; z: number }; quaternion: { x: number; y: number; z: number; w: number } }[]) => {
+      if (!payloads || payloads.length === 0) return;
       applyBatch((draft) => {
-        const block = draft.blocks.find((b) => b.id === payload.blockId);
-        if (!block) return;
-        const heightMeters = toMeters((block.levelHeight ?? 3.2) * (block.levels ?? 1), draft.units);
-        block.posX = fromMeters(payload.position.x, draft.units);
-        block.posZ = fromMeters(payload.position.z, draft.units);
-        block.posY = fromMeters(payload.position.y - heightMeters / 2, draft.units);
-        block.rotationX = MathUtils.radToDeg(payload.rotation.x);
-        block.rotationY = MathUtils.radToDeg(payload.rotation.y);
-        block.rotationZ = MathUtils.radToDeg(payload.rotation.z);
+        payloads.forEach((p) => {
+          const block = draft.blocks.find((b) => b.id === p.id);
+          if (!block) return;
+          const heightMeters = toMeters((block.levelHeight ?? 3.2) * (block.levels ?? 1), draft.units);
+          block.posX = fromMeters(p.position.x, draft.units);
+          block.posZ = fromMeters(p.position.z, draft.units);
+          block.posY = fromMeters(p.position.y - heightMeters / 2, draft.units);
+          const quat = new Quaternion(p.quaternion.x, p.quaternion.y, p.quaternion.z, p.quaternion.w);
+          const euler = new Euler().setFromQuaternion(quat, 'XYZ');
+          block.rotationX = MathUtils.radToDeg(euler.x);
+          block.rotationY = MathUtils.radToDeg(euler.y);
+          block.rotationZ = MathUtils.radToDeg(euler.z);
+        });
       });
     },
     [applyBatch]
@@ -1043,7 +1048,7 @@ function PowerToolsHud({
 
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-30">
-      <div className="pointer-events-auto rounded-[20px] border border-white/50 bg-white/90 px-4 py-2 shadow-[0_18px_45px_rgba(15,23,42,0.15)] backdrop-blur-md">
+      <div className="pointer-events-auto inline-flex max-w-[420px] flex-col rounded-[20px] border border-white/50 bg-white/90 px-4 py-2 shadow-[0_18px_45px_rgba(15,23,42,0.15)] backdrop-blur-md">
         <div className="flex items-center justify-between">
           <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-[#6d768f]">Power Tools</p>
           <button
@@ -1092,7 +1097,7 @@ function PowerToolsHud({
             <p className="mt-1 text-[10px] uppercase tracking-wide text-[#9aa2b7]">
               {selectionCount === 0 ? 'No selection' : `${selectionCount} selected`}
             </p>
-            <div className="mt-2 flex items-center gap-1.5 w-[460px]">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <ToolButton icon={Undo2} label="Undo" disabled={!canUndo} onClick={onUndo} />
               <ToolButton icon={Redo2} label="Redo" disabled={!canRedo} onClick={onRedo} />
               {POWER_TOOL_BUTTONS.map((btn) => {
@@ -1258,6 +1263,8 @@ type MetricsPanelProps = {
 function MetricsPanel({ open, onToggle, metrics }: MetricsPanelProps) {
   const byFunction = Object.entries(FUNCTION_COLORS);
   const hasValue = (key: string) => (metrics.gfaByFunction[key as BlockFunction] || 0) > 0;
+  const heightLabel = metrics.units === 'imperial' ? 'Max Height (ft)' : 'Max Height (m)';
+  const formattedHeight = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(metrics.maxHeight);
 
   return (
     <div className="absolute left-6 top-6 w-[265px] rounded-[28px] border border-[#203047] bg-[#edf0f4] text-[#232f3f] shadow-[0_18px_38px_rgba(12,20,33,0.35)]">
@@ -1279,9 +1286,10 @@ function MetricsPanel({ open, onToggle, metrics }: MetricsPanelProps) {
               <span>Total GFA</span>
               <span className="font-semibold text-[#101828]">{formatArea(metrics.totalGFA, metrics.units)}</span>
             </div>
+            {/* Max height shows skyline/top elevation rather than summed levels */}
             <div className="flex items-center justify-between">
-              <span>Total Levels</span>
-              <span className="font-semibold text-[#101828]">{metrics.totalLevels}</span>
+              <span>{heightLabel}</span>
+              <span className="font-semibold text-[#101828]">{formattedHeight}</span>
             </div>
           </div>
 

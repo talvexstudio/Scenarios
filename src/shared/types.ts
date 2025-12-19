@@ -28,6 +28,7 @@ export interface BlocksModel {
 export interface Metrics {
   totalGFA: number;
   totalLevels: number;
+  maxHeight: number;
   gfaByFunction: Partial<Record<BlockFunction, number>>;
   units: Units;
 }

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 import { ScenarioOption } from '../types';
+import { computeMetricsFromBlocksModel } from '../utils/metrics';
 
 type ScenariosState = {
   options: ScenarioOption[];
@@ -11,12 +12,8 @@ type ScenariosState = {
   seedIfEmpty: () => void;
 };
 
-const defaultOption = (): ScenarioOption => ({
-  id: nanoid(),
-  name: 'Demo Option',
-  createdAt: new Date().toISOString(),
-  source: 'blocks',
-  model: {
+const defaultOption = (): ScenarioOption => {
+  const model: ScenarioOption['model'] = {
     schemaVersion: 1,
     units: 'metric',
     createdAt: new Date().toISOString(),
@@ -46,17 +43,17 @@ const defaultOption = (): ScenarioOption => ({
         defaultFunction: 'Residential'
       }
     ]
-  },
-  metrics: {
-    totalGFA: 20 * 20 * 6 + 15 * 15 * 10,
-    totalLevels: 16,
-    gfaByFunction: {
-      Mixed: 20 * 20 * 6,
-      Residential: 15 * 15 * 10
-    },
-    units: 'metric'
-  }
-});
+  };
+
+  return {
+    id: nanoid(),
+    name: 'Demo Option',
+    createdAt: new Date().toISOString(),
+    source: 'blocks',
+    model,
+    metrics: computeMetricsFromBlocksModel(model)
+  };
+};
 
 export const useScenariosStore = create<ScenariosState>((set) => ({
   options: [],
