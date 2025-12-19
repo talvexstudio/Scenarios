@@ -13,7 +13,7 @@ type RendererHostProps = {
   gumballEnabled?: boolean;
   gumballMode?: TransformMode;
   referenceBlockId?: string | null;
-  onTransformCommit?: (payload: TransformCommit) => void;
+  onTransformCommit?: (payload: TransformCommit[]) => void;
 };
 
 export function RendererHost({
@@ -89,9 +89,10 @@ export function RendererHost({
       enabled: gumballEnabled,
       mode: gumballMode,
       targetId: referenceBlockId,
+      selectedIds: selectedBlockIds,
       onCommit: onTransformCommit
     });
-  }, [gumballEnabled, gumballMode, referenceBlockId, onTransformCommit]);
+  }, [gumballEnabled, gumballMode, referenceBlockId, onTransformCommit, selectedBlockIds]);
 
   return <div ref={containerRef} className={className ?? 'h-full w-full'} />;
 }

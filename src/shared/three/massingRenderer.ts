@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { BlocksModel, BlockFunction, Units } from '../types';
-import { toMeters } from '../utils/units';
-import { fromMeters } from '../utils/units';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { BlocksModel, BlockFunction, Units } from '../types';
+import { toMeters, fromMeters } from '../utils/units';
 
 export const MAX_CONTEXT_BUILDINGS = 600;
 const CONTEXT_BATCH_SIZE = 20;
@@ -20,9 +19,9 @@ export type ContextMeshPayload = {
 type PickHandler = (blockId: string | null, info?: { additive?: boolean }) => void;
 export type TransformMode = 'translate' | 'rotate';
 export type TransformCommit = {
-  blockId: string;
+  id: string;
   position: { x: number; y: number; z: number };
-  rotation: { x: number; y: number; z: number }; // radians
+  quaternion: { x: number; y: number; z: number; w: number };
 };
 
 export type MassingRenderer = {
@@ -36,7 +35,8 @@ export type MassingRenderer = {
     enabled: boolean;
     mode: TransformMode;
     targetId?: string | null;
-    onCommit?: (payload: TransformCommit) => void;
+    selectedIds?: string[];
+    onCommit?: (payload: TransformCommit[]) => void;
   }) => void;
   dispose: () => void;
   instanceId: number;
@@ -66,10 +66,17 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   controls.target.set(0, 4, 0);
 
   let isTransformDragging = false;
-  let transformOptions: { enabled: boolean; mode: TransformMode; targetId: string | null; onCommit?: (payload: TransformCommit) => void } = {
+  let transformOptions: {
+    enabled: boolean;
+    mode: TransformMode;
+    targetId: string | null;
+    selectedIds: string[];
+    onCommit?: (payload: TransformCommit[]) => void;
+  } = {
     enabled: false,
     mode: 'translate',
     targetId: null,
+    selectedIds: [],
     onCommit: undefined
   };
 
@@ -132,38 +139,119 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   let pickHandler: PickHandler | undefined;
   let contextBuildToken = 0;
   let currentUnits: Units = 'metric';
-  let transformStartPos: THREE.Vector3 | null = null;
-  let transformStartRot: THREE.Euler | null = null;
+  const startTransforms = new Map<string, { pos: THREE.Vector3; quat: THREE.Quaternion }>();
+  let refStartPos: THREE.Vector3 | null = null;
+  let refStartQuat: THREE.Quaternion | null = null;
 
   const cacheStartTransform = () => {
-    const obj = transformControls.object as THREE.Object3D | null;
-    if (!obj) return;
-    transformStartPos = obj.position.clone();
-    transformStartRot = obj.rotation.clone();
+    startTransforms.clear();
+    refStartPos = null;
+    refStartQuat = null;
+    if (!transformOptions.targetId) return;
+    const refObj = blockMeshes.get(transformOptions.targetId);
+    if (!refObj) return;
+    refStartPos = new THREE.Vector3();
+    refStartQuat = new THREE.Quaternion();
+    refObj.getWorldPosition(refStartPos);
+    refObj.getWorldQuaternion(refStartQuat);
+    transformOptions.selectedIds.forEach((id) => {
+      const obj = blockMeshes.get(id);
+      if (!obj) return;
+      const pos = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      obj.getWorldPosition(pos);
+      obj.getWorldQuaternion(quat);
+      startTransforms.set(id, { pos, quat });
+    });
+  };
+
+  const computeDelta = () => {
+    if (!refStartPos || !refStartQuat || !transformOptions.targetId) return null;
+    const refObj = blockMeshes.get(transformOptions.targetId);
+    if (!refObj) return null;
+    const curPos = new THREE.Vector3();
+    const curQuat = new THREE.Quaternion();
+    refObj.getWorldPosition(curPos);
+    refObj.getWorldQuaternion(curQuat);
+    if (transformOptions.mode === 'translate') {
+      const deltaPos = curPos.clone().sub(refStartPos);
+      const deltaQuat = new THREE.Quaternion(); // identity
+      return { deltaPos, deltaQuat, pivot: refStartPos.clone() };
+    }
+    const deltaQuat = curQuat.clone().multiply(refStartQuat.clone().invert());
+    const deltaPos = new THREE.Vector3(); // no translation in rotate mode
+    return { deltaPos, deltaQuat, pivot: refStartPos.clone() };
+  };
+
+  const applyPreview = () => {
+    const delta = computeDelta();
+    if (!delta) return;
+    const { deltaPos, deltaQuat, pivot } = delta;
+    transformOptions.selectedIds.forEach((id) => {
+      const obj = blockMeshes.get(id);
+      const start = startTransforms.get(id);
+      if (!obj || !start) return;
+      if (id === transformOptions.targetId) return; // TransformControls already updates ref
+      let newPos: THREE.Vector3;
+      let newQuat: THREE.Quaternion;
+      if (transformOptions.mode === 'translate') {
+        newPos = start.pos.clone().add(deltaPos);
+        newQuat = start.quat.clone();
+      } else {
+        const offset = start.pos.clone().sub(pivot).applyQuaternion(deltaQuat);
+        newPos = pivot.clone().add(offset);
+        newQuat = deltaQuat.clone().multiply(start.quat);
+      }
+      obj.position.copy(newPos);
+      obj.quaternion.copy(newQuat);
+      obj.updateMatrixWorld(true);
+    });
   };
 
   const commitTransform = () => {
-    const obj = transformControls.object as THREE.Object3D | null;
-    if (!obj || !transformOptions.onCommit || !transformOptions.targetId) return;
-    if (!transformStartPos || !transformStartRot) return;
-    const positionChanged = !obj.position.equals(transformStartPos);
-    const rotationChanged =
-      obj.rotation.x !== transformStartRot.x || obj.rotation.y !== transformStartRot.y || obj.rotation.z !== transformStartRot.z;
-    if (!positionChanged && !rotationChanged) return;
-    transformOptions.onCommit({
-      blockId: transformOptions.targetId,
-      position: { x: obj.position.x, y: obj.position.y, z: obj.position.z },
-      rotation: { x: obj.rotation.x, y: obj.rotation.y, z: obj.rotation.z }
+    const delta = computeDelta();
+    if (!delta || !transformOptions.onCommit) return;
+    const { deltaPos, deltaQuat, pivot } = delta;
+    const payload: TransformCommit[] = [];
+    transformOptions.selectedIds.forEach((id) => {
+      const obj = blockMeshes.get(id);
+      const start = startTransforms.get(id);
+      if (!obj || !start) return;
+      let newPos: THREE.Vector3;
+      let newQuat: THREE.Quaternion;
+      if (id === transformOptions.targetId) {
+        newPos = new THREE.Vector3();
+        obj.getWorldPosition(newPos);
+        newQuat = new THREE.Quaternion();
+        obj.getWorldQuaternion(newQuat);
+      } else if (transformOptions.mode === 'translate') {
+        newPos = start.pos.clone().add(deltaPos);
+        newQuat = start.quat.clone();
+      } else {
+        const offset = start.pos.clone().sub(pivot).applyQuaternion(deltaQuat);
+        newPos = pivot.clone().add(offset);
+        newQuat = deltaQuat.clone().multiply(start.quat);
+      }
+      payload.push({
+        id,
+        position: { x: newPos.x, y: newPos.y, z: newPos.z },
+        quaternion: { x: newQuat.x, y: newQuat.y, z: newQuat.z, w: newQuat.w }
+      });
     });
-    transformStartPos = null;
-    transformStartRot = null;
+    if (payload.length > 0) {
+      transformOptions.onCommit(payload);
+    }
+    startTransforms.clear();
+    refStartPos = null;
+    refStartQuat = null;
   };
 
   const updateTransformTarget = () => {
     transformControls.detach();
     transformControls.visible = false;
-    transformStartPos = null;
-    transformStartRot = null;
+    startTransforms.clear();
+    refStartPos = null;
+    refStartQuat = null;
     if (!transformOptions.enabled || !transformOptions.targetId) return;
     const target = blockMeshes.get(transformOptions.targetId);
     if (!target) return;
@@ -186,6 +274,11 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   });
   transformControls.addEventListener('mouseUp', () => {
     isTransformDragging = false;
+  });
+  transformControls.addEventListener('change', () => {
+    if (isTransformDragging) {
+      applyPreview();
+    }
   });
 
   const handleResize = () => {
@@ -413,6 +506,7 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
         enabled: options.enabled,
         mode: options.mode,
         targetId: options.targetId ?? null,
+        selectedIds: options.selectedIds ?? [],
         onCommit: options.onCommit
       };
       transformControls.setMode(transformOptions.mode);
