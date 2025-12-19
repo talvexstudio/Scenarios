@@ -21,7 +21,8 @@ import {
   Search as LucideSearch,
   Trash2 as LucideTrash2,
   Undo2 as LucideUndo2,
-  X as LucideX
+  X as LucideX,
+  Pencil as LucidePencil
 } from 'lucide-react';
 import type { LucideIcon, LucideProps } from 'lucide-react';
 
@@ -56,3 +57,4 @@ export const AlignVerticalCenter = withDefaults(LucideAlignCenterVertical);
 export const Layers = withDefaults(LucideLayers);
 export const Undo2 = withDefaults(LucideUndo2);
 export const Redo2 = withDefaults(LucideRedo2);
+export const Pencil = withDefaults(LucidePencil);

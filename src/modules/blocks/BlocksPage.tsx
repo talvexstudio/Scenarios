@@ -1,4 +1,4 @@
-import { ChangeEvent, ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, ComponentType, KeyboardEvent as ReactKeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { nanoid } from 'nanoid';
 import { BlockFunction, BlockParams, BlocksModel, Metrics, ScenarioOption } from '../../shared/types';
@@ -23,6 +23,7 @@ import {
   Crosshair,
   Download,
   Layers,
+  Pencil,
   Plus,
   Redo2,
   RefreshCw,
@@ -115,7 +116,11 @@ export function BlocksPage() {
     const handler = (event: KeyboardEvent) => {
       const isModifier = event.ctrlKey || event.metaKey;
       if (!isModifier) return;
-      if (isEditableElement(event.target as HTMLElement | null)) return;
+      if (isEditableElement(event.target as HTMLElement | null)) {
+        // When an editable field (like the rename input) has focus, let the browser handle Ctrl/Cmd+Z
+        // so native text undo works and our history shortcuts stay scoped to the scene.
+        return;
+      }
       const key = event.key.toLowerCase();
       if (key === 'z') {
         event.preventDefault();
@@ -142,6 +147,38 @@ export function BlocksPage() {
       });
     },
     [selectedBlockIds, referenceBlockId]
+  );
+
+  const ensureUniqueName = useCallback(
+    (desired: string, id: string) => {
+      const base = desired.trim();
+      const normalized = base.toLowerCase();
+      const existing = new Set(
+        blocks.filter((block) => block.id !== id).map((block) => block.name.trim().toLowerCase())
+      );
+      if (!existing.has(normalized)) {
+        return base;
+      }
+      let suffix = 2;
+      while (true) {
+        const candidate = `${base} (${suffix})`;
+        if (!existing.has(candidate.trim().toLowerCase())) {
+          return candidate;
+        }
+        suffix += 1;
+      }
+    },
+    [blocks]
+  );
+
+  const handleRename = useCallback(
+    (id: string, newName: string) => {
+      const trimmed = newName.trim();
+      if (!trimmed) return;
+      const unique = ensureUniqueName(trimmed, id);
+      updateBlock(id, { name: unique });
+    },
+    [ensureUniqueName, updateBlock]
   );
 
   useEffect(() => {
@@ -302,14 +339,27 @@ export function BlocksPage() {
           />
         </section>
 
-        <aside className="w-full lg:max-w-[400px] rounded-[32px] border border-[#dfe4ef] bg-[#f9fafc] shadow-[0_18px_45px_rgba(15,23,42,0.15)] flex flex-col lg:sticky lg:top-6 max-h-[calc(100vh-120px)] overflow-hidden">
+        <aside className="w-full lg:max-w-[400px] rounded-[32px] border border-[#dfe4ef] bg-[#f9fafc] shadow-[0_18px_45px_rgba(15,23,42,0.15)] flex flex-col lg:sticky lg:top-6 max-h-[calc(100vh-120px)] overflow-visible">
           <div className="px-6 pt-7 pb-3 text-center">
-            <p className="text-xs tracking-[0.3em] uppercase text-[#7b8ba3]">Talvex Workshop</p>
             <h1 className="text-2xl font-semibold text-[#2a3141]">Blocks</h1>
             <div className="mx-auto mt-4 h-[2px] w-20 rounded-full bg-[#d1d6e3]" />
           </div>
 
           <div className="px-6 pb-4">
+            <div className="flex items-center justify-between gap-3 rounded-[20px] border border-[#d7deef] bg-white px-4 py-3 text-xs font-semibold text-[#8a95ad]">
+              <span className="uppercase tracking-wide">Units</span>
+              <select
+                value={units}
+                onChange={(event) => setUnits(event.target.value as BlocksModel['units'])}
+                className="rounded-[16px] border border-[#d7deef] px-3 py-1.5 text-sm text-slate-700 bg-white"
+              >
+                <option value="metric">Metric (m)</option>
+                <option value="imperial">Imperial (ft)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="px-6 pb-0">
             <button
               type="button"
               onClick={addBlock}
@@ -320,29 +370,28 @@ export function BlocksPage() {
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-6 pb-8 space-y-4">
+          <div className="flex-1 overflow-y-auto px-6 pt-1 pb-0 mt-6 space-y-4">
             {blocks.map((block, index) => {
               const isSelected = selectedBlockIds.includes(block.id);
               const isReference = referenceBlockId === block.id;
               return (
-                <BlockCard
-                  key={block.id}
-                  block={block}
-                  units={units}
-                  expanded={!!expandedCards[block.id]}
+              <BlockCard
+                key={block.id}
+                block={block}
+                units={units}
+                expanded={!!expandedCards[block.id]}
                   onToggle={() => toggleCard(block.id)}
                   onChange={handleFieldChange}
                   onDuplicate={() => duplicateBlock(block)}
                   onRemove={() => removeBlock(block.id)}
                   disableRemove={blocks.length === 1}
-                  showUnitsSelector={index === 0}
-                  setUnits={setUnits}
-                  selected={isSelected}
-                  isReference={isReference}
-                  onSelect={(additive) => selectBlock(block.id, additive)}
-                  registerRef={(node) => {
-                    blockRefs.current[block.id] = node;
-                  }}
+                selected={isSelected}
+                isReference={isReference}
+                onSelect={(additive) => selectBlock(block.id, additive)}
+                onRename={handleRename}
+                registerRef={(node) => {
+                  blockRefs.current[block.id] = node;
+                }}
                 />
               );
             })}
@@ -478,11 +527,11 @@ const FUNCTION_COLORS: Record<BlockFunction, { label: string; color: string }> =
 };
 
 const PROGRAM_BADGES: Record<BlockFunction, { bg: string; icon: string }> = {
-  Retail: { bg: 'bg-[#fde7e7]', icon: '🛍️' },
-  Office: { bg: 'bg-[#e3e9ff]', icon: '🏢' },
-  Residential: { bg: 'bg-[#fff3da]', icon: '🏘️' },
-  Mixed: { bg: 'bg-[#e0f6ec]', icon: '🏗️' },
-  Others: { bg: 'bg-[#e8ebf3]', icon: '⬚' }
+  Retail: { bg: 'bg-[#ffc2c2]', icon: '🛍️' },
+  Office: { bg: 'bg-[#b4c4fe]', icon: '🏢' },
+  Residential: { bg: 'bg-[#ffe4a8]', icon: '🏠' },
+  Mixed: { bg: 'bg-[#83e2b7]', icon: '🏙️' },
+  Others: { bg: 'bg-[#949494]', icon: '⋯' }
 };
 
 type BlockCardProps = {
@@ -494,12 +543,11 @@ type BlockCardProps = {
   onDuplicate: () => void;
   onRemove: () => void;
   disableRemove: boolean;
-  showUnitsSelector: boolean;
-  setUnits: (units: BlocksModel['units']) => void;
   selected: boolean;
   isReference: boolean;
   onSelect: (additive: boolean) => void;
   registerRef?: (node: HTMLDivElement | null) => void;
+  onRename: (id: string, name: string) => void;
 };
 
 function BlockCard({
@@ -511,21 +559,87 @@ function BlockCard({
   onDuplicate,
   onRemove,
   disableRemove,
-  showUnitsSelector,
-  setUnits,
   selected,
   isReference,
   onSelect,
+  onRename,
   registerRef
 }: BlockCardProps) {
   const blockGfa = toMeters(block.xSize, units) * toMeters(block.ySize, units) * block.levels;
   const summary = `${formatArea(blockGfa, units)} \u00b7 ${block.levels} Levels`;
   const programColor = FUNCTION_COLORS[block.defaultFunction].color;
   const badge = PROGRAM_BADGES[block.defaultFunction];
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(block.name);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!isEditingName) {
+      setDraftName(block.name);
+    }
+  }, [block.name, isEditingName]);
+
+  useEffect(() => {
+    if (isEditingName) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [isEditingName]);
+
+  const ensureSelectionBeforeEdit = (event: MouseEvent<HTMLElement>) => {
+    const additive = event.ctrlKey || event.metaKey;
+    if (!selected) {
+      onSelect(additive);
+    } else if (!additive) {
+      onSelect(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!expanded && isEditingName) {
+      setIsEditingName(false);
+    }
+  }, [expanded, isEditingName]);
+
+  const handleStartEditing = (event: MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+    if (!expanded) return;
+    ensureSelectionBeforeEdit(event);
+    setIsEditingName(true);
+  };
+
+  const commitName = () => {
+    const trimmed = draftName.trim();
+    if (!trimmed) {
+      setDraftName(block.name);
+      setIsEditingName(false);
+      return;
+    }
+    setIsEditingName(false);
+    onRename(block.id, trimmed);
+  };
+
+  const cancelEditing = () => {
+    setDraftName(block.name);
+    setIsEditingName(false);
+  };
+
+  const handleNameKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      commitName();
+    } else if (event.key === 'Escape') {
+      cancelEditing();
+    }
+  };
+
   const cardClasses = [
-    'relative rounded-[28px] border border-[#e0e6f4] bg-white shadow-[0_12px_30px_rgba(32,40,62,0.08)] transition focus-within:ring-2 focus-within:ring-[#4f6cd2]/40',
-    selected ? 'border-[#4f6cd2] bg-[#edf1ff] ring-2 ring-offset-2 ring-offset-[#f6f8ff] ring-[#4f6cd2]/60' : ''
-  ].join(' ');
+    'relative rounded-[28px] border border-[#e0e6f4] bg-white shadow-[0_12px_30px_rgba(32,40,62,0.08)] transition focus-within:ring-2 focus-within:ring-[#4f6cd2]/40 p-[15px]',
+    selected ? 'border-[#4f6cd2] bg-[#edf1ff]/90 ring-2 ring-offset-2 ring-offset-[#f6f8ff] ring-[#4f6cd2]/60' : '',
+    isReference ? 'border-2 border-[#2a48c7] ring-[#2a48c7]/70' : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
   const contentId = `block-card-${block.id}`;
 
   return (
@@ -535,13 +649,7 @@ function BlockCard({
       onMouseDown={(event) => onSelect(event.ctrlKey || event.metaKey)}
       onFocusCapture={() => onSelect(false)}
     >
-      {isReference && (
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute left-0 top-3 bottom-3 w-1.5 rounded-full bg-[#4f6cd2]"
-        />
-      )}
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <div className="flex items-center justify-between gap-3 min-h-[52px]">
         <button
           type="button"
           onClick={(event) => {
@@ -551,15 +659,39 @@ function BlockCard({
           className="flex flex-1 items-center gap-3 text-left"
         >
           <span className={`flex h-10 w-10 items-center justify-center rounded-full ${badge.bg}`}>
-            <span className="text-lg" role="img" aria-hidden="true">
-              {badge.icon}
-            </span>
+            <span className="h-3 w-3 rounded-full bg-white/70" aria-hidden="true" />
           </span>
-          <div>
-            <div className="text-sm font-semibold" style={{ color: programColor }}>
-              {block.name}
+          <div className="flex flex-1 min-w-0 flex-col gap-0.5">
+            <div className="flex min-w-0 items-center gap-2 text-sm font-semibold leading-tight tracking-tight" style={{ color: programColor }}>
+              {isEditingName ? (
+                <input
+                  ref={inputRef}
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  onBlur={commitName}
+                  onKeyDown={handleNameKey}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                  className="h-7 flex-none w-[220px] max-w-[60%] px-2 bg-transparent text-sm font-semibold outline-none"
+                />
+              ) : (
+                <span className="min-w-0 truncate" onClick={handleStartEditing}>
+                  {block.name}
+                </span>
+              )}
+              {expanded && !isEditingName && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    handleStartEditing(event);
+                  }}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[#98a7c4] hover:bg-[#eef2ff]"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
             </div>
-            <div className="text-xs text-[#7f8aa4]">{summary}</div>
+            {!isEditingName && <div className="text-xs text-[#7f8aa4]">{summary}</div>}
           </div>
         </button>
         <button
@@ -578,7 +710,7 @@ function BlockCard({
       </div>
 
       {expanded && (
-        <div id={contentId} className="px-4 pb-4 pt-1 space-y-4 text-sm text-slate-700">
+        <div id={contentId} className="space-y-4 text-sm text-slate-700 mt-[10px]">
           <div className="flex items-center justify-between text-xs font-medium text-[#95a2bf]">
             <button type="button" onClick={onDuplicate} className="flex items-center gap-1 hover:text-[#4f6cd2]">
               <CopyIcon className="h-4 w-4" />
@@ -594,20 +726,6 @@ function BlockCard({
               Remove
             </button>
           </div>
-
-          {showUnitsSelector && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Units</label>
-              <select
-                value={units}
-                onChange={(event) => setUnits(event.target.value as BlocksModel['units'])}
-                className="rounded-[16px] border border-[#d7deef] px-3 py-2 text-sm bg-white"
-              >
-                <option value="metric">Metric (m)</option>
-                <option value="imperial">Imperial (ft)</option>
-              </select>
-            </div>
-          )}
 
           <SliderControl
             label="Width"
@@ -637,12 +755,12 @@ function BlockCard({
           <PositionRow block={block} onChange={onChange} />
           <AnglesRow block={block} />
 
-          <div className="flex flex-col gap-1">
-            <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Program</label>
+          <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-wide text-[#8a95ad]">
+            <span>Program</span>
             <select
               value={block.defaultFunction}
               onChange={(event) => onChange(block.id, 'defaultFunction', event.target.value)}
-              className="rounded-[16px] border border-[#d7deef] px-3 py-2 text-sm bg-white"
+              className="rounded-[16px] border border-[#d7deef] px-3 py-1.5 text-sm text-[#111a2c] bg-white"
             >
               {Object.entries(FUNCTION_COLORS).map(([key, meta]) => (
                 <option key={key} value={key}>
@@ -668,31 +786,26 @@ type SliderControlProps = {
 
 function SliderControl({ label, value, min, max, step, onChange }: SliderControlProps) {
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-[#8a95ad]">
-        <span>{label}</span>
-        <span className="text-[#111a2c] font-semibold">{Number(value).toFixed(2)}</span>
-      </div>
-      <div className="flex items-center gap-3">
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="flex-1 accent-[#4f6cd2]"
-        />
-        <input
-          type="number"
-          min={min}
-          max={max}
-          step={step}
-          value={Number(value).toFixed(2)}
-          onChange={(event) => onChange(event.target.value)}
-          className="w-24 rounded-[16px] border border-[#d7deef] px-2 py-1 text-sm text-right bg-white"
-        />
-      </div>
+    <div className="flex items-center gap-3 rounded-[16px] border border-[#d7deef] px-3 py-2 bg-white text-xs uppercase tracking-wide text-[#8a95ad]">
+      <span className="w-10 flex-none">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="flex-1 accent-[#4f6cd2]"
+      />
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={Number(value).toFixed(2)}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-20 flex-none rounded-[12px] border border-[#d7deef] px-2 py-1 text-sm text-right text-[#111a2c]"
+      />
     </div>
   );
 }
@@ -712,22 +825,21 @@ function LevelsHeightRow({ levels, levelHeight, units, onLevelsChange, onHeightC
   };
 
   return (
-    <div className="grid grid-cols-2 gap-4">
-      <div className="flex flex-col gap-2">
-        <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Levels</label>
-        <div className="flex items-center justify-between rounded-[16px] border border-[#d7deef] px-2 py-1 bg-white">
-          <button type="button" onClick={() => stepLevel(-1)} className="px-2 text-lg text-[#4f6cd2]">
-            -
-          </button>
-          <span className="text-base font-semibold">{levels}</span>
-          <button type="button" onClick={() => stepLevel(1)} className="px-2 text-lg text-[#4f6cd2]">
-            +
-          </button>
-        </div>
-      </div>
-      <div className="flex flex-col gap-2">
-        <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Level Height (m)</label>
-        <div className="flex items-center gap-2 rounded-[16px] border border-[#d7deef] px-3 py-2 bg-white">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-wide text-[#8a95ad]">
+        <label className="flex items-center gap-2">
+          <span>Levels</span>
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={levels}
+            onChange={(event) => onLevelsChange(Number(event.target.value))}
+            className="w-20 rounded-[12px] border border-[#d7deef] px-2 py-1 text-sm text-right text-[#111a2c] bg-white"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          <span>Level Height</span>
           <input
             type="number"
             step={0.1}
@@ -735,10 +847,9 @@ function LevelsHeightRow({ levels, levelHeight, units, onLevelsChange, onHeightC
             max={6}
             value={Number(levelHeight).toFixed(2)}
             onChange={(event) => onHeightChange(event.target.value)}
-            className="w-full bg-transparent text-sm"
+            className="w-20 rounded-[12px] border border-[#d7deef] px-2 py-1 text-sm text-right text-[#111a2c] bg-white"
           />
-          <span className="text-xs text-slate-500">{units === 'metric' ? 'm' : 'ft'}</span>
-        </div>
+        </label>
       </div>
     </div>
   );
@@ -801,7 +912,7 @@ function PowerToolsHud({
   onUndo,
   onRedo
 }: PowerToolsHudProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-30">
@@ -862,19 +973,19 @@ const POSITION_FIELDS: Array<{ label: string; field: keyof BlockParams }> = [
 
 function PositionRow({ block, onChange }: PositionRowProps) {
   return (
-    <div className="flex flex-col gap-2">
-      <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Position (x, y, z)</label>
-      <div className="grid grid-cols-3 gap-3">
+    <div className="flex flex-col gap-1">
+      <div className="text-xs uppercase tracking-wide text-[#8a95ad]">Position (x, y, z)</div>
+      <div className="flex items-center gap-1">
         {POSITION_FIELDS.map(({ label, field }) => (
-          <div key={field} className="flex flex-col gap-1">
-            <span className="text-[11px] uppercase tracking-[0.2em] text-[#b3bcd3]">{label}</span>
+          <label key={field} className="flex items-center gap-2 rounded-[14px] border border-[#d7deef] px-2 py-1 bg-white text-xs uppercase tracking-wide text-[#8a95ad]">
+            <span>{label}</span>
             <input
               type="number"
               value={block[field] as number}
               onChange={(event) => onChange(block.id, field, event.target.value)}
-              className="rounded-[14px] border border-[#d7deef] px-2 py-1 text-sm bg-white"
+              className="w-16 rounded-[10px] border border-[#e2e7f0] px-2 py-0.5 text-sm text-[#111a2c]"
             />
-          </div>
+          </label>
         ))}
       </div>
     </div>
@@ -888,9 +999,9 @@ function AnglesRow({ block }: { block: BlockParams }) {
     rotationZ: block.rotationZ ?? 0
   };
   return (
-    <div className="flex flex-col gap-2">
-      <label className="text-xs uppercase tracking-[0.2em] text-[#8a95ad]">Angles</label>
-      <div className="grid grid-cols-3 gap-3">
+    <div className="flex flex-col gap-1">
+      <div className="text-xs uppercase tracking-wide text-[#8a95ad]">Angles</div>
+      <div className="flex items-center gap-1">
         {(
           [
             { label: 'X', field: 'rotationX' },
@@ -898,7 +1009,10 @@ function AnglesRow({ block }: { block: BlockParams }) {
             { label: 'Z', field: 'rotationY' }
           ] as const
         ).map(({ label, field }) => (
-          <AngleControl key={label} axis={label} field={field} value={angles[field]} blockId={block.id} />
+          <label key={label} className="flex items-center gap-2 rounded-[14px] border border-[#d7deef] bg-white px-2 py-1 text-xs uppercase tracking-wide text-[#8a95ad]">
+            <span>{label}</span>
+            <AngleControl axis={label} field={field} value={angles[field]} blockId={block.id} />
+          </label>
         ))}
       </div>
     </div>
@@ -927,19 +1041,14 @@ function AngleControl({
   const displayValue = Number((Math.abs(normalized - Math.round(normalized)) < 1e-3 ? Math.round(normalized) : normalized).toFixed(1));
 
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[11px] uppercase tracking-[0.2em] text-[#b3bcd3]">{axis}</span>
-      <div className="rounded-[14px] border border-[#d7deef] bg-white p-1">
-        <input
-          type="number"
-          step={0.1}
-          value={displayValue}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => handleChange(Number(event.target.value))}
-          className="w-full rounded-[10px] border border-[#e2e7f0] px-2 py-1 text-center text-sm"
-        />
-      </div>
-    </div>
+    <input
+      type="number"
+      step={0.1}
+      value={displayValue}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => handleChange(Number(event.target.value))}
+      className="w-16 rounded-[10px] border border-[#e2e7f0] px-2 py-0.5 text-sm text-center text-[#111a2c]"
+    />
   );
 }
 

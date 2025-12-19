@@ -1,0 +1,54 @@
+# Blocks screen annotation
+
+- Header spans full width with black background, Talvex logo on left and module title centered (“Talvex Blocks”), About link right-aligned.
+- Viewport occupies roughly two thirds of layout width on left, framed with large rounded rectangle and subtle drop shadow.
+- Talvex metrics card floats inside viewport top-left, showing Total GFA, Total Levels, and GFA by function list with dots per program color.
+- Metrics card includes a collapse chevron and maintains Apple-like typography with uppercase section labels.
+- 3D canvas renders translucent per-level block stacks plus muted city context; horizon lines show coordinate axes.
+- Power Tools HUD docks bottom-left inside canvas, collapsed by default with pill label and chevron toggle.
+- When expanded, HUD shows selection count label and icon buttons for undo, redo, reset, center, set Z=0, align X/Y/Z, and stack actions.
+- Orbit controls allow spin toggle in viewport (button bottom-right) separate from Power Tools overlay.
+- Main sidebar on right is a tall rounded card labeled “Talvex Workshop – Blocks,” matching neutral white background.
+- “Add New Block” button sits near top of sidebar, dashed outline to indicate empty-state action.
+- Block cards stack vertically with subtle shadows; each card features icon badge, block name, duplicate/remove controls, and collapse chevron.
+- Only the first block card is expanded initially (others collapsed), showing program summary text below name.
+- Units selector drop-down appears once near top of expanded card, defaulting to Metric (m).
+- Width and Depth sliders display numeric endpoints beside handles for precise sizing.
+- Levels control uses minus/plus buttons with central value, mirrored by Level Height numeric input with unit suffix.
+- Position row shows three numeric inputs labeled X, Y, Z, mapping to plan/vertical axes per localization rules.
+- Angles row mirrors position row with numeric inputs for X/Y/Z rotation; each field includes subtle border.
+- Program selector drop-down sits at bottom of parameter stack, showing Retail/Office/etc options.
+- Additional collapsed cards display only summary rows with small program icons and levels text, accessible via chevrons.
+- Sticky action bar at bottom of sidebar hosts Send to Scenarios primary CTA (blue pill) plus Save .TBK and Load .TBK secondary buttons.
+- Primary CTA includes arrow icon and disabled state when no blocks exist; secondary buttons use outlined style with icons.
+- Sidebar remains scrollable so parameter groups remain accessible while action bar stays visible.
+- Overall hierarchy: viewport first, metrics overlay secondary, sidebar form tertiary, floating tools/quaternary actions.
+
+# Scenarios screen annotation
+
+- Header matches Blocks layout: black bar, Talvex logo left, centered title showing “Talvex Scenarios,” About link on right.
+- Viewport again spans left side with rounded container, sharing same camera angle and context massing.
+- Context metrics card is removed; only spin toggle remains bottom-right labeled “Enable Spin.”
+- Right sidebar becomes “Talvex Scenarios Board,” a white rounded card matching workshop styling.
+- Context status row shows whether Overpass context is set, including lat/lon pair and radius text.
+- Two secondary buttons (“Context” and “Configure options”) appear top-right of sidebar for modal entry points.
+- Select option drop-down spans full width beneath buttons, listing immutable scenario snapshots from Blocks.
+- Current option summary card displays GFA, Levels, and program breakdown (“By Program”) with numeric alignment to right.
+- Pros/Cons lists follow summary card with bullet points, using muted grey typography.
+- Primary CTA at sidebar bottom is “Export PDF report,” blue pill with arrow icon; placeholder for upcoming feature.
+- Sidebar uses same soft shadow and padding as Blocks panel, reinforcing visual parity.
+- When dropdown is empty, placeholder copy indicates no scenarios; when populated, selecting updates viewport.
+- Viewport canvas shares context grid lines and translucent block stacks, but lacks editing gizmos.
+- Spin toggle button is a pill in viewport bottom-right, separate from board actions.
+- Overall layout keeps navigation minimal: only CTA and two secondary buttons, emphasizing read-only review.
+- Option metrics card is always expanded; there’s no collapse control unlike Blocks parameter cards.
+- Sidebar content scrolls if copy exceeds available space while CTA remains pinned to bottom.
+- Header indicates module identity while About button serves as global info entry.
+- No power tools overlay in Scenarios; viewport is clean to emphasize presentation state.
+- Right panel uses uppercase label “Talvex Scenarios Board” with letter spacing to match brand typography.
+- Drop-down uses pill styling consistent with Blocks selectors, ensuring cross-module cohesion.
+- Metrics text uses bold values aligned right with units (m²) for immediate readability.
+- Pros/Cons bullets use simple dots and short sentences, reflecting minimalistic data presentation.
+- Context button state text displays “Context: set (lat, lon) / radius m” line directly below buttons.
+- Layout maintains generous whitespace between sections for readability on large displays.
+- Scenarios module enforces immutable snapshots; no edit controls appear aside from navigation CTAs.
