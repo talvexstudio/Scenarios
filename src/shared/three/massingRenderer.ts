@@ -7,7 +7,7 @@ import { toMeters, fromMeters } from '../utils/units';
 export const MAX_CONTEXT_BUILDINGS = 600;
 const CONTEXT_BATCH_SIZE = 20;
 const CONTEXT_COLOR = 0x48505f;
-const DEBUG_CONTEXT = true;
+const DEBUG_CONTEXT = false;
 let rendererInstanceCounter = 0;
 
 export type ContextMeshPayload = {
@@ -97,7 +97,7 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   scene.add(directional.target);
 
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(2000, 2000),
+    new THREE.PlaneGeometry(50000, 50000),
     new THREE.MeshStandardMaterial({ color: 0x3b3b3b, roughness: 0.95 })
   );
   ground.rotation.x = -Math.PI / 2;
@@ -739,12 +739,12 @@ function createContextMesh(payload: ContextMeshPayload) {
     new THREE.MeshStandardMaterial({
       color: CONTEXT_COLOR,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.9,
       roughness: 0.95,
       metalness: 0.05
     })
   );
-  mesh.castShadow = false;
+  mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.userData.isContext = true;
   return mesh;

@@ -249,10 +249,7 @@ export function ScenariosPage() {
             </div>
 
             {selectedOption ? (
-              <>
-                <MetricsCard option={selectedOption} />
-                <ProsCons option={selectedOption} />
-              </>
+              <MetricsCard option={selectedOption} />
             ) : (
               <p className="text-sm text-slate-500">No options yet. Create one from the Blocks workshop.</p>
             )}
@@ -431,32 +428,6 @@ function MetricsCard({ option }: { option: ScenarioOption }) {
           })}
         </div>
       </dl>
-    </div>
-  );
-}
-
-function ProsCons({ option }: { option: ScenarioOption }) {
-  return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h3 className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-2">Pros</h3>
-        <ul className="list-disc pl-4 text-sm text-slate-700 flex flex-col gap-1">
-          {option.metrics.totalLevels > 0 ? (
-            <>
-              <li>Good balance of program mix</li>
-              <li>Uses Talvex Blocks snapshot</li>
-            </>
-          ) : (
-            <li>Awaiting data</li>
-          )}
-        </ul>
-      </div>
-      <div>
-        <h3 className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-2">Cons</h3>
-        <ul className="list-disc pl-4 text-sm text-slate-700 flex flex-col gap-1">
-          <li>Detailed evaluation coming soon</li>
-        </ul>
-      </div>
     </div>
   );
 }
