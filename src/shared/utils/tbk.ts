@@ -9,7 +9,7 @@ const CONTEXT_FILENAME = 'context.json';
 export async function createTBKArchive(model: BlocksModel, context: ContextFileData | null): Promise<Blob> {
   const zip = new JSZip();
   zip.file(MODEL_FILENAME, JSON.stringify(model, null, 2));
-  if (context && context.center && context.buildings.length) {
+  if (context) {
     zip.file(CONTEXT_FILENAME, JSON.stringify(context, null, 2));
   }
   return zip.generateAsync({ type: 'blob' });

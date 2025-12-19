@@ -153,7 +153,7 @@ export const useContextStore = create<ContextState>()(
       },
       getSnapshotForSave: () => {
         const { center, radiusM, buildings, fetchedAt, source } = get();
-        if (!center || !buildings.length) return null;
+        if (!center) return null;
         return {
           schemaVersion: CONTEXT_SCHEMA_VERSION,
           center,

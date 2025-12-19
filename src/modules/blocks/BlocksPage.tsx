@@ -11,6 +11,7 @@ import { RendererHost } from '../../shared/three/RendererHost';
 import { formatArea, toMeters, fromMeters } from '../../shared/utils/units';
 import { TransformMode } from '../../shared/three/massingRenderer';
 import { MathUtils, Quaternion, Euler } from 'three';
+import { Modal } from '../../shared/ui/Modal';
 import { prepareContextPayload } from '../../shared/context/prepareContextPayload';
 import { createTBKArchive, parseTBKFile } from '../../shared/utils/tbk';
 import {
@@ -74,8 +75,18 @@ export function BlocksPage() {
   const [metricsOpen, setMetricsOpen] = useState(true);
   const [gumballEnabled, setGumballEnabled] = useState(false);
   const [gumballMode, setGumballMode] = useState<TransformMode>('translate');
+  const [sendModalOpen, setSendModalOpen] = useState(false);
+  const [sendName, setSendName] = useState('');
 
   const canSend = blocks.length > 0;
+
+  const openSendModal = useCallback(() => {
+    if (!canSend) return;
+    setSendName(generateDefaultOptionName());
+    setSendModalOpen(true);
+  }, [canSend]);
+
+  const closeSendModal = useCallback(() => setSendModalOpen(false), []);
   const liveModel = useMemo<BlocksModel>(
     () => ({
       schemaVersion: 1,
@@ -340,10 +351,10 @@ export function BlocksPage() {
     updateBlock(id, { [field]: parsedValue } as any);
   };
 
-  const handleSend = () => {
+  const handleSend = (customName?: string) => {
     if (!canSend) return;
     const model = getModelSnapshot();
-    const option = buildScenarioOption(model);
+    const option = buildScenarioOption(model, customName);
     if (scenarios.length < 3) {
       addScenario(option);
       selectScenario(option.id);
@@ -351,6 +362,13 @@ export function BlocksPage() {
     } else {
       setReplaceCandidate(option);
     }
+  };
+
+  const handleConfirmSend = () => {
+    if (!canSend) return;
+    const finalName = sendName.trim() || generateDefaultOptionName();
+    handleSend(finalName);
+    setSendModalOpen(false);
   };
 
   const handleReplace = (targetId: string) => {
@@ -525,7 +543,7 @@ export function BlocksPage() {
           <div className="sticky bottom-0 border-t border-slate-200 bg-[#f9fafc] px-6 py-4 flex flex-col gap-3">
             <button
               type="button"
-              onClick={handleSend}
+              onClick={openSendModal}
               disabled={!canSend}
               className="rounded-full bg-[#2f6dea] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2 shadow-[0_10px_25px_rgba(37,99,235,0.35)] transition hover:bg-[#2256c8]"
             >
@@ -561,6 +579,38 @@ export function BlocksPage() {
         onChange={handleLoad}
         className="hidden"
       />
+      <Modal open={sendModalOpen} onClose={closeSendModal} title="Send option to Scenarios">
+        <div className="space-y-4 text-sm text-slate-700">
+          <p>Name the scenario before sending it to the review board.</p>
+          <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Scenario name
+            <input
+              type="text"
+              value={sendName}
+              onChange={(event) => setSendName(event.target.value)}
+              className="rounded-2xl border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 shadow-inner focus:border-[#2563eb] focus:outline-none"
+              placeholder="Workshop option"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeSendModal}
+              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!canSend}
+              onClick={handleConfirmSend}
+              className="rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {replaceCandidate && (
         <div className="modal-overlay">
@@ -619,8 +669,12 @@ export function BlocksPage() {
   );
 }
 
-function buildScenarioOption(model: BlocksModel): ScenarioOption {
-  const name = `Workshop option ${new Date().toLocaleTimeString()}`;
+function generateDefaultOptionName() {
+  return `Workshop option ${new Date().toLocaleTimeString()}`;
+}
+
+function buildScenarioOption(model: BlocksModel, providedName?: string): ScenarioOption {
+  const name = providedName?.trim() ? providedName.trim() : generateDefaultOptionName();
   return {
     id: nanoid(),
     name,
