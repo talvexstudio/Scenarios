@@ -2,6 +2,7 @@ import { ChangeEvent, ComponentType, KeyboardEvent as ReactKeyboardEvent, MouseE
 import { useNavigate } from 'react-router-dom';
 import { nanoid } from 'nanoid';
 import { BlockFunction, BlockParams, BlocksModel, Metrics, ScenarioOption } from '../../shared/types';
+import { PROGRAM_COLORS } from '../../shared/constants/programs';
 import { useBlocksStore } from '../../shared/stores/blocksStore';
 import { useScenariosStore } from '../../shared/stores/scenariosStore';
 import { useContextStore, ContextSnapshot } from '../../shared/stores/contextStore';
@@ -697,14 +698,6 @@ function validateTBK(model: any): asserts model is BlocksModel {
   });
 }
 
-const FUNCTION_COLORS: Record<BlockFunction, { label: string; color: string }> = {
-  Retail: { label: 'Retail', color: '#f17373' },
-  Office: { label: 'Office', color: '#4f6cd2' },
-  Residential: { label: 'Residential', color: '#f6c95a' },
-  Mixed: { label: 'Mixed-use', color: '#73c6a2' },
-  Others: { label: 'Others', color: '#c5ccd6' }
-};
-
 const PROGRAM_BADGES: Record<BlockFunction, { bg: string; icon: string }> = {
   Retail: { bg: 'bg-[#ffc2c2]', icon: '🛍️' },
   Office: { bg: 'bg-[#b4c4fe]', icon: '🏢' },
@@ -746,7 +739,7 @@ function BlockCard({
 }: BlockCardProps) {
   const blockGfa = toMeters(block.xSize, units) * toMeters(block.ySize, units) * block.levels;
   const summary = `${formatArea(blockGfa, units)} \u00b7 ${block.levels} Levels`;
-  const programColor = FUNCTION_COLORS[block.defaultFunction].color;
+  const programColor = PROGRAM_COLORS[block.defaultFunction].color;
   const badge = PROGRAM_BADGES[block.defaultFunction];
   const [isEditingName, setIsEditingName] = useState(false);
   const [draftName, setDraftName] = useState(block.name);
@@ -941,7 +934,7 @@ function BlockCard({
               onChange={(event) => onChange(block.id, 'defaultFunction', event.target.value)}
               className="rounded-[16px] border border-[#d7deef] px-3 py-1.5 text-sm text-[#111a2c] bg-white"
             >
-              {Object.entries(FUNCTION_COLORS).map(([key, meta]) => (
+              {Object.entries(PROGRAM_COLORS).map(([key, meta]) => (
                 <option key={key} value={key}>
                   {meta.label}
                 </option>
@@ -1315,7 +1308,7 @@ type MetricsPanelProps = {
 };
 
 function MetricsPanel({ open, onToggle, metrics }: MetricsPanelProps) {
-  const byFunction = Object.entries(FUNCTION_COLORS);
+  const byFunction = Object.entries(PROGRAM_COLORS);
   const hasValue = (key: string) => (metrics.gfaByFunction[key as BlockFunction] || 0) > 0;
   const heightLabel = metrics.units === 'imperial' ? 'Max Height (ft)' : 'Max Height (m)';
   const formattedHeight = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(metrics.maxHeight);

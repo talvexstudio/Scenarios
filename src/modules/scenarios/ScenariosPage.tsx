@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useScenariosStore } from '../../shared/stores/scenariosStore';
 import { useContextStore } from '../../shared/stores/contextStore';
 import { prepareContextPayload } from '../../shared/context/prepareContextPayload';
-import { ScenarioOption } from '../../shared/types';
+import { BlockFunction, ScenarioOption } from '../../shared/types';
 import { formatArea } from '../../shared/utils/units';
 import { RendererHost } from '../../shared/three/RendererHost';
 import type { MassingRenderer } from '../../shared/three/massingRenderer';
+import { PROGRAM_COLORS } from '../../shared/constants/programs';
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -176,7 +177,7 @@ export function ScenariosPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
-      <div className="flex flex-1 min-h-0 flex-col lg:flex-row gap-6">
+      <div className="flex flex-1 min-h-0 flex-col lg:flex-row lg:items-stretch gap-6">
         <section className="flex-1 min-h-0 rounded-[24px] border border-slate-200 bg-white shadow relative">
           <RendererHost
             model={selectedOption?.model ?? null}
@@ -197,26 +198,24 @@ export function ScenariosPage() {
           </button>
         </section>
 
-        <aside className="w-full lg:max-w-[420px] h-full rounded-[24px] border border-slate-200 bg-white shadow flex flex-col">
+        <aside className="w-full lg:max-w-[420px] lg:self-stretch rounded-[24px] border border-slate-200 bg-white shadow flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-auto p-6 flex flex-col gap-5">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs tracking-[0.2em] uppercase text-slate-500">Talvex Scenarios Board</p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={openContextPanel}
-                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
-                >
-                  Context
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfigure}
-                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
-                >
-                  Configure options
-                </button>
-              </div>
+            <p className="text-xs tracking-[0.2em] uppercase text-slate-500">Talvex Scenarios Board</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={openContextPanel}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
+              >
+                Configure Context
+              </button>
+              <button
+                type="button"
+                onClick={handleConfigure}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
+              >
+                Configure options
+              </button>
             </div>
             <div className="flex flex-col text-xs text-slate-500">
               {center ? (
@@ -258,17 +257,17 @@ export function ScenariosPage() {
               <p className="text-sm text-slate-500">No options yet. Create one from the Blocks workshop.</p>
             )}
           </div>
-          <div className="sticky bottom-0 border-t border-slate-200 bg-white p-4">
-          <button
-            type="button"
-            className="w-full rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1d4ec9]"
-            disabled
-          >
-            <span className="inline-flex items-center justify-center gap-2">
-              Export PDF report
-              <ArrowRight className="text-white" />
-            </span>
-          </button>
+          <div className="mt-auto border-t border-slate-200 bg-white/90 p-4">
+            <button
+              type="button"
+              className="w-full rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1d4ec9]"
+              disabled
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                Export PDF report
+                <ArrowRight className="text-white" />
+              </span>
+            </button>
           </div>
         </aside>
       </div>
@@ -397,6 +396,10 @@ export function ScenariosPage() {
 }
 
 function MetricsCard({ option }: { option: ScenarioOption }) {
+  const heightLabel = option.metrics.units === 'imperial' ? 'Max Height (ft)' : 'Max Height (m)';
+  const formattedHeight = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(
+    option.metrics.maxHeight
+  );
   return (
     <div className="rounded-[18px] border border-slate-200 bg-[#f9fafc] p-5">
       <dl className="flex flex-col gap-4 text-sm">
@@ -405,17 +408,27 @@ function MetricsCard({ option }: { option: ScenarioOption }) {
           <dd>{formatArea(option.metrics.totalGFA, option.metrics.units)}</dd>
         </div>
         <div className="flex justify-between">
-          <dt>Levels</dt>
-          <dd>{option.metrics.totalLevels}</dd>
+          <dt>{heightLabel}</dt>
+          {/* Max height reflects skyline/top elevation rather than summed levels */}
+          <dd>{formattedHeight}</dd>
         </div>
         <div className="flex flex-col gap-1">
           <dt className="text-xs uppercase tracking-wide text-slate-500">By program</dt>
-          {Object.entries(option.metrics.gfaByFunction || {}).map(([fn, value]) => (
-            <div key={fn} className="flex justify-between pl-2">
-              <span>{fn}</span>
-              <span>{formatArea(value ?? 0, option.metrics.units)}</span>
-            </div>
-          ))}
+          {Object.entries(option.metrics.gfaByFunction || {}).map(([fn, value]) => {
+            const meta = PROGRAM_COLORS[fn as BlockFunction];
+            return (
+              <div key={fn} className="flex justify-between pl-2">
+                <span className="inline-flex items-center gap-2">
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: meta?.color ?? '#94a3b8' }}
+                  />
+                  {meta?.label ?? fn}
+                </span>
+                <span>{formatArea(value ?? 0, option.metrics.units)}</span>
+              </div>
+            );
+          })}
         </div>
       </dl>
     </div>
