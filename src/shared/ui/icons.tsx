@@ -13,6 +13,7 @@ import {
   Layers as LucideLayers,
   MapPin as LucideMapPin,
   MoreHorizontal as LucideMoreHorizontal,
+  Move3d as LucideMove3d,
   Plus as LucidePlus,
   RefreshCw as LucideRefreshCw,
   Redo2 as LucideRedo2,
@@ -54,6 +55,7 @@ export const ArrowDownToLine = withDefaults(LucideArrowDownToLine);
 export const ArrowLeftRight = withDefaults(LucideArrowLeftRight);
 export const ArrowUpDown = withDefaults(LucideArrowUpDown);
 export const AlignVerticalCenter = withDefaults(LucideAlignCenterVertical);
+export const Move3d = withDefaults(LucideMove3d);
 export const Layers = withDefaults(LucideLayers);
 export const Undo2 = withDefaults(LucideUndo2);
 export const Redo2 = withDefaults(LucideRedo2);

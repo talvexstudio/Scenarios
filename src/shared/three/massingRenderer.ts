@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { BlocksModel, BlockFunction, Units } from '../types';
 import { toMeters } from '../utils/units';
+import { fromMeters } from '../utils/units';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
 export const MAX_CONTEXT_BUILDINGS = 600;
 const CONTEXT_BATCH_SIZE = 20;
@@ -16,6 +18,12 @@ export type ContextMeshPayload = {
 };
 
 type PickHandler = (blockId: string | null, info?: { additive?: boolean }) => void;
+export type TransformMode = 'translate' | 'rotate';
+export type TransformCommit = {
+  blockId: string;
+  position: { x: number; y: number; z: number };
+  rotation: { x: number; y: number; z: number }; // radians
+};
 
 export type MassingRenderer = {
   setModel: (model?: BlocksModel) => void;
@@ -24,6 +32,12 @@ export type MassingRenderer = {
   setPickHandler: (handler?: PickHandler) => void;
   setContext: (payload: ContextMeshPayload[] | null | undefined) => Promise<void>;
   frameContext: () => boolean;
+  setTransformOptions: (options: {
+    enabled: boolean;
+    mode: TransformMode;
+    targetId?: string | null;
+    onCommit?: (payload: TransformCommit) => void;
+  }) => void;
   dispose: () => void;
   instanceId: number;
 };
@@ -50,6 +64,14 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   controls.enableDamping = true;
   controls.dampingFactor = 0.07;
   controls.target.set(0, 4, 0);
+
+  let isTransformDragging = false;
+  let transformOptions: { enabled: boolean; mode: TransformMode; targetId: string | null; onCommit?: (payload: TransformCommit) => void } = {
+    enabled: false,
+    mode: 'translate',
+    targetId: null,
+    onCommit: undefined
+  };
 
   const ambient = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(ambient);
@@ -96,6 +118,12 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const selectionHelpers = new Map<string, THREE.BoxHelper>();
+  const transformControls: any = new TransformControls(camera, renderer.domElement);
+  transformControls.visible = false;
+  transformControls.setMode(transformOptions.mode);
+  transformControls.showX = transformControls.showY = transformControls.showZ = true;
+  transformControls.setSpace('world');
+  scene.add(transformControls);
   let highlightedIds: string[] = [];
 
   let autoSpin = false;
@@ -103,6 +131,62 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   let resizeObserver: ResizeObserver | undefined;
   let pickHandler: PickHandler | undefined;
   let contextBuildToken = 0;
+  let currentUnits: Units = 'metric';
+  let transformStartPos: THREE.Vector3 | null = null;
+  let transformStartRot: THREE.Euler | null = null;
+
+  const cacheStartTransform = () => {
+    const obj = transformControls.object as THREE.Object3D | null;
+    if (!obj) return;
+    transformStartPos = obj.position.clone();
+    transformStartRot = obj.rotation.clone();
+  };
+
+  const commitTransform = () => {
+    const obj = transformControls.object as THREE.Object3D | null;
+    if (!obj || !transformOptions.onCommit || !transformOptions.targetId) return;
+    if (!transformStartPos || !transformStartRot) return;
+    const positionChanged = !obj.position.equals(transformStartPos);
+    const rotationChanged =
+      obj.rotation.x !== transformStartRot.x || obj.rotation.y !== transformStartRot.y || obj.rotation.z !== transformStartRot.z;
+    if (!positionChanged && !rotationChanged) return;
+    transformOptions.onCommit({
+      blockId: transformOptions.targetId,
+      position: { x: obj.position.x, y: obj.position.y, z: obj.position.z },
+      rotation: { x: obj.rotation.x, y: obj.rotation.y, z: obj.rotation.z }
+    });
+    transformStartPos = null;
+    transformStartRot = null;
+  };
+
+  const updateTransformTarget = () => {
+    transformControls.detach();
+    transformControls.visible = false;
+    transformStartPos = null;
+    transformStartRot = null;
+    if (!transformOptions.enabled || !transformOptions.targetId) return;
+    const target = blockMeshes.get(transformOptions.targetId);
+    if (!target) return;
+    transformControls.setMode(transformOptions.mode);
+    transformControls.attach(target);
+    transformControls.visible = true;
+  };
+
+  transformControls.addEventListener('dragging-changed', (event: any) => {
+    isTransformDragging = event.value;
+    controls.enabled = !event.value;
+    if (event.value) {
+      cacheStartTransform();
+    } else {
+      commitTransform();
+    }
+  });
+  transformControls.addEventListener('mouseDown', () => {
+    isTransformDragging = true;
+  });
+  transformControls.addEventListener('mouseUp', () => {
+    isTransformDragging = false;
+  });
 
   const handleResize = () => {
     const w = container.clientWidth || width;
@@ -131,6 +215,7 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
   animate();
 
   const handlePointerDown = (event: PointerEvent) => {
+    if (isTransformDragging || transformControls.dragging) return;
     const rect = renderer.domElement.getBoundingClientRect();
     pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -220,8 +305,10 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
       });
       blockMeshes.clear();
       highlightedIds = [];
+      updateTransformTarget();
       return;
     }
+    currentUnits = model.units;
 
     const leftover = new Set(blockMeshes.keys());
 
@@ -250,6 +337,7 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
     });
 
     applySelectionHighlight();
+    updateTransformTarget();
     logContextChildren('setModel/end');
   };
 
@@ -320,12 +408,23 @@ export function createMassingRenderer(container: HTMLElement): MassingRenderer {
       controls.update();
       return true;
     },
+    setTransformOptions: (options) => {
+      transformOptions = {
+        enabled: options.enabled,
+        mode: options.mode,
+        targetId: options.targetId ?? null,
+        onCommit: options.onCommit
+      };
+      transformControls.setMode(transformOptions.mode);
+      updateTransformTarget();
+    },
     dispose: () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', handleResize);
       resizeObserver?.disconnect();
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
       controls.dispose();
+      transformControls.detach();
       renderer.dispose();
       contextGroup.clear();
       selectionHelpers.forEach((helper) => disposeSelectionHelper(helper));

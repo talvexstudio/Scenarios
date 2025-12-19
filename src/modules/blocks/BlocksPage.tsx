@@ -8,7 +8,9 @@ import { useContextStore, ContextSnapshot } from '../../shared/stores/contextSto
 import { computeMetricsFromBlocksModel } from '../../shared/utils/metrics';
 import { deepClone } from '../../shared/utils/clone';
 import { RendererHost } from '../../shared/three/RendererHost';
-import { formatArea, toMeters } from '../../shared/utils/units';
+import { formatArea, toMeters, fromMeters } from '../../shared/utils/units';
+import { TransformMode } from '../../shared/three/massingRenderer';
+import { MathUtils } from 'three';
 import { prepareContextPayload } from '../../shared/context/prepareContextPayload';
 import { createTBKArchive, parseTBKFile } from '../../shared/utils/tbk';
 import {
@@ -21,6 +23,8 @@ import {
   ChevronUp,
   Copy as CopyIcon,
   Crosshair,
+  Move3d,
+  RotateCw,
   Download,
   Layers,
   Pencil,
@@ -68,6 +72,8 @@ export function BlocksPage() {
   const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
   const [metricsOpen, setMetricsOpen] = useState(true);
+  const [gumballEnabled, setGumballEnabled] = useState(false);
+  const [gumballMode, setGumballMode] = useState<TransformMode>('translate');
 
   const canSend = blocks.length > 0;
   const liveModel = useMemo<BlocksModel>(
@@ -99,6 +105,23 @@ export function BlocksPage() {
     );
     return payload;
   }, [contextCenter, contextBuildings, contextLastKey, contextRadius]);
+
+  const handleTransformCommit = useCallback(
+    (payload: { blockId: string; position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }) => {
+      applyBatch((draft) => {
+        const block = draft.blocks.find((b) => b.id === payload.blockId);
+        if (!block) return;
+        const heightMeters = toMeters((block.levelHeight ?? 3.2) * (block.levels ?? 1), draft.units);
+        block.posX = fromMeters(payload.position.x, draft.units);
+        block.posZ = fromMeters(payload.position.z, draft.units);
+        block.posY = fromMeters(payload.position.y - heightMeters / 2, draft.units);
+        block.rotationX = MathUtils.radToDeg(payload.rotation.x);
+        block.rotationY = MathUtils.radToDeg(payload.rotation.y);
+        block.rotationZ = MathUtils.radToDeg(payload.rotation.z);
+      });
+    },
+    [applyBatch]
+  );
 
   const handleRendererPick = useCallback(
     (blockId: string | null, info?: { additive?: boolean }) => {
@@ -410,6 +433,10 @@ export function BlocksPage() {
             context={blocksContextPayload}
             selectedBlockIds={selectedBlockIds}
             onPickBlock={handleRendererPick}
+            gumballEnabled={gumballEnabled}
+            gumballMode={gumballMode}
+            referenceBlockId={referenceBlockId}
+            onTransformCommit={handleTransformCommit}
             className="h-full w-full min-h-[420px] rounded-[24px] bg-[#f4f6fb]"
           />
           <MetricsPanel
@@ -425,6 +452,10 @@ export function BlocksPage() {
             canRedo={canRedo}
             onUndo={undo}
             onRedo={redo}
+            gumballEnabled={gumballEnabled}
+            gumballMode={gumballMode}
+            onToggleGumball={setGumballEnabled}
+            onChangeGumballMode={setGumballMode}
           />
         </section>
 
@@ -952,6 +983,10 @@ type PowerToolsHudProps = {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  gumballEnabled: boolean;
+  gumballMode: TransformMode;
+  onToggleGumball: (enabled: boolean) => void;
+  onChangeGumballMode: (mode: TransformMode) => void;
 };
 
 const POWER_TOOL_BUTTONS: Array<{
@@ -998,7 +1033,11 @@ function PowerToolsHud({
   canUndo,
   canRedo,
   onUndo,
-  onRedo
+  onRedo,
+  gumballEnabled,
+  gumballMode,
+  onToggleGumball,
+  onChangeGumballMode
 }: PowerToolsHudProps) {
   const [collapsed, setCollapsed] = useState(true);
 
@@ -1014,6 +1053,39 @@ function PowerToolsHud({
           >
             {collapsed ? <ChevronUp /> : <ChevronDown />}
           </button>
+        </div>
+        <div className="mt-2 flex items-center gap-3 text-[11px] text-[#4b5672]">
+          <label className="inline-flex items-center gap-1 text-[11px]">
+            <input
+              type="checkbox"
+              checked={gumballEnabled}
+              onChange={(e) => onToggleGumball(e.target.checked)}
+              className="h-3 w-3 rounded border-slate-300 text-[#4f6cd2] focus:ring-0"
+            />
+            Gumball
+          </label>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onChangeGumballMode('translate')}
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition ${
+                gumballMode === 'translate' ? 'bg-[#ecf0fb] text-[#1f2740]' : 'text-[#7b869e] hover:bg-[#f4f6fb]'
+              }`}
+              disabled={!gumballEnabled}
+            >
+              <Move3d />
+            </button>
+            <button
+              type="button"
+              onClick={() => onChangeGumballMode('rotate')}
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition ${
+                gumballMode === 'rotate' ? 'bg-[#ecf0fb] text-[#1f2740]' : 'text-[#7b869e] hover:bg-[#f4f6fb]'
+              }`}
+              disabled={!gumballEnabled}
+            >
+              <RotateCw />
+            </button>
+          </div>
         </div>
         {!collapsed && (
           <>

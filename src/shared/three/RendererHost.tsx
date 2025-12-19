@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { BlocksModel } from '../types';
-import { createMassingRenderer, MassingRenderer, ContextMeshPayload } from './massingRenderer';
+import { createMassingRenderer, MassingRenderer, ContextMeshPayload, TransformMode, TransformCommit } from './massingRenderer';
 
 type RendererHostProps = {
   model?: BlocksModel | null;
@@ -10,6 +10,10 @@ type RendererHostProps = {
   className?: string;
   selectedBlockIds?: string[];
   onPickBlock?: (id: string | null, info?: { additive?: boolean }) => void;
+  gumballEnabled?: boolean;
+  gumballMode?: TransformMode;
+  referenceBlockId?: string | null;
+  onTransformCommit?: (payload: TransformCommit) => void;
 };
 
 export function RendererHost({
@@ -19,7 +23,11 @@ export function RendererHost({
   onReady,
   className,
   selectedBlockIds = [],
-  onPickBlock
+  onPickBlock,
+  gumballEnabled = false,
+  gumballMode = 'translate',
+  referenceBlockId = null,
+  onTransformCommit
 }: RendererHostProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<MassingRenderer | null>(null);
@@ -74,6 +82,16 @@ export function RendererHost({
   useEffect(() => {
     rendererRef.current?.setPickHandler(onPickBlock);
   }, [onPickBlock]);
+
+  useEffect(() => {
+    if (!rendererRef.current) return;
+    rendererRef.current.setTransformOptions({
+      enabled: gumballEnabled,
+      mode: gumballMode,
+      targetId: referenceBlockId,
+      onCommit: onTransformCommit
+    });
+  }, [gumballEnabled, gumballMode, referenceBlockId, onTransformCommit]);
 
   return <div ref={containerRef} className={className ?? 'h-full w-full'} />;
 }
