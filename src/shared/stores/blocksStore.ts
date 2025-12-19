@@ -26,6 +26,7 @@ type BlocksState = {
   clearSelection: () => void;
   undo: () => void;
   redo: () => void;
+  applyBatch: (mutator: (draft: { blocks: BlockParams[]; units: Units }) => void) => void;
 };
 
 const defaultBlock = (index: number): BlockParams => ({
@@ -161,6 +162,26 @@ export const useBlocksStore = create<BlocksState>((set, get) => {
             future: remainingFuture
           },
           selectedBlockIds: state.selectedBlockIds.filter((id) => next.blocks.some((block) => block.id === id))
+        };
+      }),
+    applyBatch: (mutator) =>
+      set((state) => {
+        const draft = {
+          units: state.units,
+          blocks: deepClone(state.blocks).map(ensureRotation)
+        };
+        mutator(draft);
+        const changed =
+          draft.units !== state.units ||
+          JSON.stringify(state.blocks) !== JSON.stringify(draft.blocks);
+        if (!changed) {
+          return state;
+        }
+        return {
+          ...state,
+          units: draft.units,
+          blocks: draft.blocks,
+          history: { past: pushPast(state), future: [] }
         };
       })
   };

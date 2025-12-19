@@ -27,13 +27,11 @@ import {
   Plus,
   Redo2,
   RefreshCw,
-  RotateCcw,
   Trash2,
   Undo2
 } from '../../shared/ui/icons';
 
 type PowerToolAction =
-  | 'reset-position'
   | 'center-origin'
   | 'set-z-zero'
   | 'align-x'
@@ -48,6 +46,7 @@ export function BlocksPage() {
   const selectBlock = useBlocksStore((state) => state.selectBlock);
   const undo = useBlocksStore((state) => state.undo);
   const redo = useBlocksStore((state) => state.redo);
+  const applyBatch = useBlocksStore((state) => state.applyBatch);
   const canUndo = useBlocksStore((state) => state.history.past.length > 0);
   const canRedo = useBlocksStore((state) => state.history.future.length > 0);
   const scenarios = useScenariosStore((state) => state.options);
@@ -140,13 +139,103 @@ export function BlocksPage() {
 
   const handlePowerTool = useCallback(
     (action: PowerToolAction) => {
+      if (!referenceBlockId) {
+        return;
+      }
+
+      if (action === 'center-origin') {
+        if (selectedBlockIds.length === 0) {
+          return;
+        }
+        applyBatch((draft) => {
+          const refBlock = draft.blocks.find((block) => block.id === referenceBlockId);
+          if (!refBlock) return;
+          const referencePos = getEffectivePosition(refBlock);
+          const delta: EffectivePosition = {
+            x: -referencePos.x,
+            y: -referencePos.y,
+            z: -referencePos.z
+          };
+          if (isZeroDelta(delta)) {
+            return;
+          }
+          const selectedSet = new Set(selectedBlockIds);
+          draft.blocks.forEach((block) => {
+            if (!selectedSet.has(block.id)) return;
+            applyEffectiveDelta(block, delta);
+          });
+        });
+        return;
+      }
+
+      if (action === 'set-z-zero') {
+        if (selectedBlockIds.length === 0) return;
+        applyBatch((draft) => {
+          const selectedSet = new Set(selectedBlockIds);
+          let mutated = false;
+          draft.blocks.forEach((block) => {
+            if (!selectedSet.has(block.id)) return;
+            if (getAxisValue(block, 'Z') !== 0) {
+              setAxisValue(block, 'Z', 0);
+              mutated = true;
+            }
+          });
+          if (!mutated) return;
+        });
+        return;
+      }
+
+      if (action === 'align-x' || action === 'align-y' || action === 'align-z') {
+        if (selectedBlockIds.length < 2) return;
+        const axis = action.split('-')[1].toUpperCase() as PositionAxis;
+        applyBatch((draft) => {
+          const refBlock = draft.blocks.find((block) => block.id === referenceBlockId);
+          if (!refBlock) return;
+          const target = getAxisValue(refBlock, axis);
+          const selectedSet = new Set(selectedBlockIds);
+          let mutated = false;
+          draft.blocks.forEach((block) => {
+            if (!selectedSet.has(block.id) || block.id === referenceBlockId) return;
+            if (getAxisValue(block, axis) !== target) {
+              setAxisValue(block, axis, target);
+              mutated = true;
+            }
+          });
+          if (!mutated) return;
+        });
+        return;
+      }
+
+      if (action === 'stack') {
+        if (selectedBlockIds.length < 2) return;
+        applyBatch((draft) => {
+          const ordered = selectedBlockIds
+            .map((id) => draft.blocks.find((block) => block.id === id))
+            .filter((block): block is BlockParams => Boolean(block));
+          if (ordered.length < 2) return;
+          let runningTop = getAxisValue(ordered[0], 'Z') + (ordered[0].levels ?? 1) * (ordered[0].levelHeight ?? 3.2);
+          let mutated = false;
+          for (let i = 1; i < ordered.length; i += 1) {
+            const block = ordered[i];
+            const height = (block.levels ?? 1) * (block.levelHeight ?? 3.2);
+            if (getAxisValue(block, 'Z') !== runningTop) {
+              setAxisValue(block, 'Z', runningTop);
+              mutated = true;
+            }
+            runningTop += height;
+          }
+          if (!mutated) return;
+        });
+        return;
+      }
+
       console.log('[Blocks][PowerTool]', {
         action,
         selectedBlockIds,
         referenceId: referenceBlockId
       });
     },
-    [selectedBlockIds, referenceBlockId]
+    [applyBatch, referenceBlockId, selectedBlockIds]
   );
 
   const ensureUniqueName = useCallback(
@@ -871,7 +960,6 @@ const POWER_TOOL_BUTTONS: Array<{
   icon: ComponentType<{ className?: string }>;
   minSelected: number;
 }> = [
-  { id: 'reset-position', label: 'Reset Position', icon: RotateCcw, minSelected: 1 },
   { id: 'center-origin', label: 'Center to Origin', icon: Crosshair, minSelected: 1 },
   { id: 'set-z-zero', label: 'Set Z = 0', icon: ArrowDownToLine, minSelected: 1 },
   { id: 'align-x', label: 'Align X', icon: ArrowLeftRight, minSelected: 2 },
@@ -965,11 +1053,41 @@ type PositionRowProps = {
   onChange: (id: string, field: keyof BlockParams, value: string) => void;
 };
 
-const POSITION_FIELDS: Array<{ label: string; field: keyof BlockParams }> = [
-  { label: 'X', field: 'posX' },
-  { label: 'Y', field: 'posZ' },
-  { label: 'Z', field: 'posY' }
-];
+const POSITION_AXIS_MAP = {
+  X: 'posX',
+  Y: 'posZ',
+  Z: 'posY'
+} as const;
+
+type PositionAxis = keyof typeof POSITION_AXIS_MAP;
+
+const POSITION_FIELDS: Array<{ label: PositionAxis; field: keyof BlockParams }> = (
+  ['X', 'Y', 'Z'] as PositionAxis[]
+).map((axis) => ({
+  label: axis,
+  field: POSITION_AXIS_MAP[axis]
+}));
+
+type EffectivePosition = { x: number; y: number; z: number };
+
+const getEffectivePosition = (block: BlockParams): EffectivePosition => ({
+  x: block[POSITION_AXIS_MAP.X],
+  y: block[POSITION_AXIS_MAP.Y],
+  z: block[POSITION_AXIS_MAP.Z]
+});
+
+const applyEffectiveDelta = (block: BlockParams, delta: EffectivePosition) => {
+  block[POSITION_AXIS_MAP.X] += delta.x;
+  block[POSITION_AXIS_MAP.Y] += delta.y;
+  block[POSITION_AXIS_MAP.Z] += delta.z;
+};
+
+const isZeroDelta = (delta: EffectivePosition) => delta.x === 0 && delta.y === 0 && delta.z === 0;
+
+const getAxisValue = (block: BlockParams, axis: PositionAxis) => block[POSITION_AXIS_MAP[axis]];
+const setAxisValue = (block: BlockParams, axis: PositionAxis, value: number) => {
+  block[POSITION_AXIS_MAP[axis]] = value;
+};
 
 function PositionRow({ block, onChange }: PositionRowProps) {
   return (
